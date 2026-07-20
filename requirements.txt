@@ -1,0 +1,3 @@
+scrapegraphai==2.1.5
+langchain-ollama==1.1.0
+playwright==1.61.0
