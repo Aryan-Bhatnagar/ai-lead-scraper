@@ -17,6 +17,16 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "leads.db"
 
+
+def set_database_path(path: str | Path) -> None:
+    """Override the default database path.
+
+    The tests pass a temporary SQLite file so API factories use the
+    configured path without creating/reading the production database.
+    """
+    global DB_PATH
+    DB_PATH = Path(path)
+
 JOB_STATUSES = {"queued", "running", "completed", "failed"}
 JOB_ITEM_STATUSES = {"queued", "running", "success", "no_data", "failed", "skipped"}
 
@@ -178,6 +188,14 @@ def get_lead_by_source_url(source_url: str, db_path: Path | str = DB_PATH) -> di
     with get_connection(db_path) as conn:
         row = conn.execute(
             "SELECT * FROM leads WHERE source_url = ?", (source_url,)
+        ).fetchone()
+        return dict(row) if row else None
+
+def get_lead_by_id(lead_id: int, db_path: Path | str = DB_PATH) -> dict | None:
+    """Return a lead row by primary key id or None if not found."""
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM leads WHERE id = ?", (lead_id,)
         ).fetchone()
         return dict(row) if row else None
 
