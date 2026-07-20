@@ -143,6 +143,24 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             jobs = [dict(row) for row in cursor.fetchall()]
         return jsonify({"jobs": jobs, "count": len(jobs)})
 
+    @app.route("/api/jobs", methods=["POST"])
+    def create_job():
+        data = request.get_json(force=True, silent=True)
+        if not data or "urls" not in data:
+            abort(400, description="Missing 'urls' field")
+        urls = data["urls"]
+        if not isinstance(urls, list) or len(urls) == 0:
+            abort(400, description="`urls` must be a non-empty list")
+        for u in urls:
+            if not isinstance(u, str) or not u.strip():
+                abort(400, description="All `urls` must be non-empty strings")
+        db_path = app.config["DATABASE"]
+        job_id = db.create_scrape_job(urls, db_path)
+        from scraper import scrape_api_helper as helper
+        helper.run_job_in_background(job_id, urls, db_path)
+        resp = {"job_id": job_id, "status": "queued"}
+        return jsonify(resp), 202
+
     @app.route("/api/jobs/<int:job_id>", methods=["GET"])
     def get_job(job_id: int):
         with db.get_connection(app.config["DATABASE"]) as conn:

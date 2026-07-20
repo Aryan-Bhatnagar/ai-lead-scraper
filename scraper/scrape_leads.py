@@ -876,7 +876,10 @@ def append_row(path: Path, row: dict) -> None:
 # ---------------------------------------------------------------------------
 # Database integration
 # ---------------------------------------------------------------------------
-import database as db
+try:
+    from . import database as db
+except ImportError:
+    import database as db
 
 # ---------------------------------------------------------------------------
 # Main
