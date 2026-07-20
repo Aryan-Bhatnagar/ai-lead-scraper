@@ -28,6 +28,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from flask import Flask, jsonify, request, abort
+import json
+from urllib.parse import urlparse
 from flask_cors import CORS
 
 # ``scraper.database`` is the only place where the concrete SQLite
@@ -145,19 +147,46 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
 
     @app.route("/api/jobs", methods=["POST"])
     def create_job():
-        data = request.get_json(force=True, silent=True)
-        if not data or "urls" not in data:
+        # Step 1: Ensure a body exists
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        # Step 2: Parse JSON
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+        # Step 3: Validate presence of 'urls'
+        if "urls" not in payload:
             abort(400, description="Missing 'urls' field")
-        urls = data["urls"]
-        if not isinstance(urls, list) or len(urls) == 0:
+        urls_raw = payload["urls"]
+        # Step 4: Validate that urls_raw is a non-empty list
+        if not isinstance(urls_raw, list) or len(urls_raw) == 0:
             abort(400, description="`urls` must be a non-empty list")
-        for u in urls:
-            if not isinstance(u, str) or not u.strip():
-                abort(400, description="All `urls` must be non-empty strings")
+        cleaned_urls: list[str] = []
+        seen: set[str] = set()
+        for entry in urls_raw:
+            if not isinstance(entry, str):
+                abort(400, description="All `urls` must be strings")
+            raw_url = entry.strip()
+            if not raw_url:
+                abort(400, description="URL entries cannot be empty or whitespace only")
+            parsed = urlparse(raw_url)
+            if parsed.scheme not in ("http", "https"):
+                abort(400, description="URL must use http:// or https:// scheme")
+            if not parsed.hostname:
+                abort(400, description="URL missing host")
+            if raw_url not in seen:
+                seen.add(raw_url)
+                cleaned_urls.append(raw_url)
+        if not cleaned_urls:
+            abort(400, description="No valid URLs provided")
         db_path = app.config["DATABASE"]
-        job_id = db.create_scrape_job(urls, db_path)
+        job_id = db.create_scrape_job(cleaned_urls, db_path)
         from scraper import scrape_api_helper as helper
-        helper.run_job_in_background(job_id, urls, db_path)
+        helper.run_job_in_background(job_id, cleaned_urls, db_path)
         resp = {"job_id": job_id, "status": "queued"}
         return jsonify(resp), 202
 
@@ -185,6 +214,14 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     @app.errorhandler(404)
     def resource_not_found(e):  # pragma: no cover
         return jsonify({"error": e.description}), 404
+
+    @app.errorhandler(400)
+    def bad_request_handler(e):  # pragma: no cover
+        return jsonify({"error": e.description or "Bad request"}), 400
+
+    @app.errorhandler(405)
+    def method_not_allowed_handler(e):  # pragma: no cover
+        return jsonify({"error": e.description or "Method not allowed"}), 405
 
     @app.errorhandler(500)
     def internal_error(e):  # pragma: no cover
