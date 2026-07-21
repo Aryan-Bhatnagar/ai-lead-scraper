@@ -192,6 +192,75 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         resp = {"job_id": job_id, "status": "queued"}
         return jsonify(resp), 202
 
+    @app.route("/api/discover-and-scrape", methods=["POST"])
+    def discover_and_scrape():
+        # Parse incoming JSON payload
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+        # Validate industry
+        if "industry" not in payload:
+            abort(400, description="Missing 'industry' field")
+        industry = payload["industry"]
+        if not isinstance(industry, str):
+            abort(400, description="'industry' must be a string")
+        industry = industry.strip()
+        if not industry:
+            abort(400, description="'industry' cannot be empty")
+        # Validate location
+        if "location" not in payload:
+            abort(400, description="Missing 'location' field")
+        location = payload["location"]
+        if not isinstance(location, str):
+            abort(400, description="'location' must be a string")
+        location = location.strip()
+        if not location:
+            abort(400, description="'location' cannot be empty")
+        # Validate max_results with defaults and bounds; reject booleans
+        max_results = payload.get("max_results", 10)
+        if not isinstance(max_results, int) or isinstance(max_results, bool):
+            abort(400, description="'max_results' must be an integer")
+        if max_results < 1 or max_results > 50:
+            abort(400, description="'max_results' must be between 1 and 50")
+        # Run discovery
+        try:
+            results = discover_leads(industry=industry, location=location, max_results=max_results)
+        except Exception:
+            app.logger.exception("Lead discovery failed")
+            return jsonify({"error": "Lead discovery failed"}), 500
+        # Extract URLs, validate them and deduplicate preserving order
+        urls: list[str] = []
+        seen: set[str] = set()
+        for entry in results:
+            url_val = None
+            if isinstance(entry, dict):
+                url_val = entry.get("url")
+            else:
+                continue
+            if not isinstance(url_val, str):
+                continue
+            url_str = url_val.strip()
+            if not url_str:
+                continue
+            if not (url_str.startswith("http://") or url_str.startswith("https://")):
+                continue
+            if url_str not in seen:
+                seen.add(url_str)
+                urls.append(url_str)
+        if len(urls) == 0:
+            return jsonify({"status": "no_candidates", "discovered_count": 0, "urls": []}), 200
+        db_path = app.config["DATABASE"]
+        job_id = db.create_scrape_job(urls, db_path)
+        from scraper import scrape_api_helper as helper
+        helper.run_job_in_background(job_id, urls, db_path)
+        return jsonify({"status": "queued", "job_id": job_id, "discovered_count": len(urls), "urls": urls}), 202
+
     @app.route("/api/jobs/<int:job_id>", methods=["GET"])
     def get_job(job_id: int):
         with db.get_connection(app.config["DATABASE"]) as conn:
