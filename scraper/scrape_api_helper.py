@@ -40,7 +40,12 @@ from typing import Iterable, Tuple
 
 # These imports are cheap and guaranteed to exist in the repository.
 from scraper import database as db_module
-from scraper.scrape_leads import scrape_site, has_meaningful_data
+from scraper.scrape_leads import (
+    scrape_site,
+    has_meaningful_data,
+    quality_score,
+    data_quality,
+)
 
 # ---------------------------------------------------------------------------
 # Logging – Swallow the default Flask logger interference.
@@ -90,9 +95,15 @@ def _process_url(job_id: int, url: str, db_path) -> Tuple[str, str, str]:
     # Attach the authoritative source URL before database persistence.
     lead["source_url"] = url
 
-    # Persist the lead – failures to persist are treated as a failed item.
+    # Calculate deterministic lead quality before persistence.
+    score = quality_score(lead)
+    lead["quality_score"] = score
+    lead["data_quality"] = data_quality(score, "success")
+    lead["status"] = "success"
+
+    # Persist the fully scored lead.
     try:
-        db_module.upsert_lead(lead, db_path)
+     db_module.upsert_lead(lead, db_path)
     except Exception as exc:
         error_msg = f"DB insert error: {type(exc).__name__}: {exc}"
         db_module.update_job_item(job_id, url, "failed", error=error_msg, db_path=db_path)
