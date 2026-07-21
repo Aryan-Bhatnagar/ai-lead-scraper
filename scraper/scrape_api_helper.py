@@ -87,6 +87,9 @@ def _process_url(job_id: int, url: str, db_path) -> Tuple[str, str, str]:
         db_module.update_job_item(job_id, url, "no_data", db_path=db_path)
         return url, "no_data", ""
 
+    # Attach the authoritative source URL before database persistence.
+    lead["source_url"] = url
+
     # Persist the lead – failures to persist are treated as a failed item.
     try:
         db_module.upsert_lead(lead, db_path)
