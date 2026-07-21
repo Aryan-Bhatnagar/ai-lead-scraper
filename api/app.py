@@ -38,6 +38,8 @@ from flask_cors import CORS
 # calling ``create_app``.
 import scraper.database as db
 
+from scraper.lead_discovery import discover_leads
+
 # ---------------------------------------------------------------------------
 # Helper functions – thin wrappers that delegate to the database module.  The
 # database module exposes ``get_lead_by_id`` and ``get_all_scrape_jobs``.  We add
@@ -207,6 +209,85 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             cursor.execute("SELECT * FROM scrape_job_items WHERE job_id = ?", (job_id,))
             items = [dict(row) for row in cursor.fetchall()]
         return jsonify({"items": items, "count": len(items)})
+
+    # --- Lead Discovery -----------------------------------------------------
+    @app.route("/api/discover", methods=["POST"])
+    def discover():
+        # Step 1: Ensure a request body exists
+        raw = request.get_data(cache=False)
+
+        if not raw:
+            abort(400, description="Request body is missing")
+
+        # Step 2: Parse JSON
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+
+        # Step 3: Validate industry
+        if "industry" not in payload:
+            abort(400, description="Missing 'industry' field")
+
+        industry = payload["industry"]
+
+        if not isinstance(industry, str):
+            abort(400, description="'industry' must be a string")
+
+        industry = industry.strip()
+
+        if not industry:
+            abort(400, description="'industry' cannot be empty")
+
+        # Step 4: Validate location
+        if "location" not in payload:
+            abort(400, description="Missing 'location' field")
+
+        location = payload["location"]
+
+        if not isinstance(location, str):
+            abort(400, description="'location' must be a string")
+
+        location = location.strip()
+
+        if not location:
+            abort(400, description="'location' cannot be empty")
+
+        # Step 5: Validate max_results
+        max_results = payload.get("max_results", 10)
+
+        if not isinstance(max_results, int) or isinstance(max_results, bool):
+            abort(400, description="'max_results' must be an integer")
+
+        if max_results < 1 or max_results > 50:
+            abort(
+                400,
+                description="'max_results' must be between 1 and 50"
+            )
+
+        # Step 6: Run discovery
+        try:
+            results = discover_leads(
+                industry=industry,
+                location=location,
+                max_results=max_results,
+            )
+        except Exception:
+            app.logger.exception("Lead discovery failed")
+            return jsonify({
+                "error": "Lead discovery failed"
+            }), 500
+
+        # Step 7: Return candidate websites
+        return jsonify({
+            "results": results,
+            "count": len(results),
+            "industry": industry,
+            "location": location,
+        }), 200
 
     # ---------------------------------------------------------------------
     # Error handling – return JSON, hide stack traces.
