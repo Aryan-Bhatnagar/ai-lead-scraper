@@ -1,40 +1,57 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/apiClient';
 
 export default function Leads() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const loadLeads = async () => {
-      try {
-        const response = await api.get('/leads');
-        setLeads(response.data.leads || []);
-      } catch (err) {
-        setError(
-          err.response?.data?.error ||
-            'Failed to load leads.'
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadLeads = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
+      setRefreshing(true);
+    }
 
-    loadLeads();
+    setError('');
+
+    try {
+      const response = await api.get('/leads');
+      setLeads(response.data.leads || []);
+    } catch (err) {
+      setError(
+        err.response?.data?.error ||
+          'Failed to load leads.'
+      );
+    } finally {
+      setLoading(false);
+
+      if (isRefresh) {
+        setRefreshing(false);
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    loadLeads();
+  }, [loadLeads]);
 
   if (loading) {
     return <p>Loading leads...</p>;
   }
 
-  if (error) {
-    return <p>{error}</p>;
-  }
-
   return (
     <section>
       <h2>Leads</h2>
+
+      <button
+        type="button"
+        onClick={() => loadLeads(true)}
+        disabled={refreshing}
+      >
+        {refreshing ? 'Refreshing...' : 'Refresh'}
+      </button>
+
+      {error && <p>{error}</p>}
 
       {leads.length === 0 ? (
         <p>No leads found.</p>
@@ -56,7 +73,7 @@ export default function Leads() {
               <tr key={lead.id}>
                 <td>{lead.id}</td>
                 <td>{lead.company_name || '-'}</td>
-                <td>{lead.source_url || '-'}</td>
+                <td>{lead.website || lead.source_url || '-'}</td>
                 <td>{lead.email || '-'}</td>
                 <td>{lead.phone || '-'}</td>
                 <td>{lead.status || '-'}</td>

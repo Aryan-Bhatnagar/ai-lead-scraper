@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/apiClient';
 
 export default function NewScrapeJob() {
+  const navigate = useNavigate();  
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -28,10 +30,12 @@ export default function NewScrapeJob() {
     try {
       const response = await api.post('/jobs', { urls });
 
-      setMessage(
+            setMessage(
         `Scrape job ${response.data.job_id} created successfully.`
       );
       setInput('');
+
+      navigate('/jobs');
     } catch (err) {
       setError(
         err.response?.data?.error ||
