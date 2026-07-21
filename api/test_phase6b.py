@@ -109,16 +109,78 @@ class Phase6BTest(unittest.TestCase):
         resp = self.client.post("/api/jobs", data="not json", headers={"Content-Type": "text/plain"})
         self.assertEqual(resp.status_code, 400)
 
-    def test_scrape_site_exception_handled(self):
-        with patch("scraper.scrape_api_helper.scrape_site", side_effect=Exception("Test error")), \
-             patch("scraper.scrape_api_helper.has_meaningful_data", return_value=True):
-            resp = self.client.post("/api/jobs", json={"urls": ["https://error.com"]})
+    def test_scraped_lead_missing_source_url_uses_job_url(self):
+        lead_without_source_url = mock_lead("SourceUrlTestCo")
+        lead_without_source_url.pop("source_url")
+
+        job_url = "https://source-url-test.com"
+
+        with patch(
+            "scraper.scrape_api_helper.scrape_site",
+            return_value=lead_without_source_url,
+        ), patch(
+            "scraper.scrape_leads.has_meaningful_data",
+            return_value=True,
+        ):
+            resp = self.client.post(
+                "/api/jobs",
+                json={"urls": [job_url]},
+            )
+
             self.assertEqual(resp.status_code, 202)
             job_id = resp.get_json()["job_id"]
+
             completed = self._poll_job(job_id)
+
+            self.assertIsNotNone(completed)
+            self.assertEqual(completed["status"], "completed")
+            self.assertEqual(completed["successful_urls"], 1)
+            self.assertEqual(completed["failed_urls"], 0)
+
+            lead = db_module.get_lead_by_source_url(
+                job_url,
+                self.temp_db_path,
+            )
+
+            self.assertIsNotNone(lead)
+            self.assertEqual(lead["company_name"], "SourceUrlTestCo")
+            self.assertEqual(lead["source_url"], job_url)
+
+            items = db_module.get_job_items(
+                job_id,
+                self.temp_db_path,
+            )
+
+            self.assertEqual(len(items), 1)
+            self.assertEqual(items[0]["source_url"], job_url)
+            self.assertEqual(items[0]["status"], "success")
+
+    def test_scrape_site_exception_handled(self):
+        with patch(
+            "scraper.scrape_api_helper.scrape_site",
+            side_effect=Exception("Test error"),
+        ), patch(
+            "scraper.scrape_api_helper.has_meaningful_data",
+            return_value=True,
+        ):
+            resp = self.client.post(
+                "/api/jobs",
+                json={"urls": ["https://error.com"]},
+            )
+
+            self.assertEqual(resp.status_code, 202)
+            job_id = resp.get_json()["job_id"]
+
+            completed = self._poll_job(job_id)
+
             self.assertIsNotNone(completed)
             self.assertEqual(completed["failed_urls"], 1)
-            items = db_module.get_job_items(job_id, self.temp_db_path)
+
+            items = db_module.get_job_items(
+                job_id,
+                self.temp_db_path,
+            )
+
             self.assertEqual(items[0]["status"], "failed")
 
 if __name__ == "__main__":
