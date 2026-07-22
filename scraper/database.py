@@ -128,6 +128,28 @@ CREATE INDEX IF NOT EXISTS idx_leads_data_quality ON leads(data_quality);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_lead_status ON leads(lead_status);
 CREATE INDEX IF NOT EXISTS idx_job_items_job_id ON scrape_job_items(job_id);
+
+-- Outreach queue table (Phase 10B)
+CREATE TABLE IF NOT EXISTS outreach_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL,
+    outreach_channel TEXT NOT NULL,
+    outreach_status TEXT NOT NULL DEFAULT 'PENDING',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_contacted_at TEXT,
+    next_follow_up_at TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE,
+    CHECK (outreach_channel IN ('EMAIL','WHATSAPP','CALL')),
+    CHECK (outreach_status IN ('PENDING','PROCESSING','SENT','FAILED','COMPLETED'))
+);
+
+-- Prevent duplicate active entries per lead/channel
+CREATE UNIQUE INDEX IF NOT EXISTS uq_outreach_active
+ON outreach_queue (lead_id, outreach_channel)
+WHERE outreach_status IN ('PENDING','PROCESSING','SENT');
 """
 
 
@@ -202,6 +224,193 @@ def initialize_database(db_path: Path | str = DB_PATH) -> None:
 
 # ---------------------------------------------------------------------------
 # Leads
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Outreach Queue (Phase 10B)
+# ---------------------------------------------------------------------------
+
+# Allowed channel and status values – used for validation in the API.
+OUTREACH_CHANNELS = {"EMAIL", "WHATSAPP", "CALL"}
+OUTREACH_STATUSES = {"PENDING", "PROCESSING", "SENT", "FAILED", "COMPLETED"}
+ACTIVE_OUTREACH_STATUSES = {"PENDING", "PROCESSING", "SENT"}
+
+def create_outreach_entry(
+    lead_id: int,
+    outreach_channel: str,
+    db_path: Path | str = DB_PATH,
+    next_follow_up_at: str | None = None,
+) -> int:
+    """Insert a new outreach queue entry.
+
+    The function validates:
+    * ``outreach_channel`` is in :data:`OUTREACH_CHANNELS`.
+    * No *active* queue entry exists for the same ``lead_id``/``outreach_channel``.
+    It sets ``created_at``/``updated_at`` using :func:`utc_now` and returns the
+    new row ``id``.
+    """
+    if outreach_channel not in OUTREACH_CHANNELS:
+        raise ValueError(f"Invalid outreach_channel: {outreach_channel}")
+
+    now = utc_now()
+    with get_connection(db_path) as conn:
+        # Application‑level duplicate‑active guard – raise if one already exists.
+        dup = conn.execute(
+            "SELECT 1 FROM outreach_queue WHERE lead_id = ? AND outreach_channel = ? AND outreach_status IN (" + ",".join([f"'{s}'" for s in ACTIVE_OUTREACH_STATUSES]) + ")",
+            (lead_id, outreach_channel),
+        ).fetchone()
+        if dup:
+            raise ValueError(
+                "active outreach entry already exists for this lead and channel"
+            )
+        cur = conn.execute(
+            """
+            INSERT INTO outreach_queue (
+                lead_id,
+                outreach_channel,
+                outreach_status,
+                attempt_count,
+                created_at,
+                updated_at,
+                next_follow_up_at
+            ) VALUES (?, ?, 'PENDING', 0, ?, ?, ?)
+            """,
+            (lead_id, outreach_channel, now, now, next_follow_up_at),
+        )
+        return cur.lastrowid
+
+def get_outreach_entries(
+    db_path: Path | str = DB_PATH,
+    lead_id: int | None = None,
+    outreach_channel: str | None = None,
+    outreach_status: str | None = None,
+) -> list[dict]:
+    """Return outreach queue rows optionally filtered by the given parameters.
+
+    Includes related lead information (company_name, email, phone) via a LEFT JOIN.
+    """
+    # Base query selects all outreach_queue columns plus lead fields.
+    query = """
+        SELECT oq.*, l.company_name, l.email, l.phone
+        FROM outreach_queue oq
+        LEFT JOIN leads l ON oq.lead_id = l.id
+    """
+    clauses: list[str] = []
+    params: list = []
+    if lead_id is not None:
+        clauses.append("oq.lead_id = ?")
+        params.append(lead_id)
+    if outreach_channel is not None:
+        clauses.append("oq.outreach_channel = ?")
+        params.append(outreach_channel)
+    if outreach_status is not None:
+        clauses.append("oq.outreach_status = ?")
+        params.append(outreach_status)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(query, params)
+        rows = cursor.fetchall()
+    return [dict(r) for r in rows]
+
+def get_outreach_entry_by_id(entry_id: int, db_path: Path | str = DB_PATH) -> dict | None:
+    """Return a single outreach entry (including related lead fields).
+
+    The result includes the outreach_queue columns plus ``company_name``, ``email`` and ``phone``
+    from the associated lead, via a LEFT JOIN.
+    """
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT oq.*, l.company_name, l.email, l.phone
+            FROM outreach_queue oq
+            LEFT JOIN leads l ON oq.lead_id = l.id
+            WHERE oq.id = ?
+            """,
+            (entry_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+def update_outreach_entry(
+    entry_id: int,
+    db_path: Path | str = DB_PATH,
+    **fields,
+) -> bool:
+    """Update mutable fields of an outreach entry.
+
+    Allowed mutable fields are ``outreach_status``, ``next_follow_up_at``,
+    ``error_message``. Attempt count and timestamps are handled automatically.
+    """
+    if not fields:
+        return False
+    allowed = {"outreach_status", "next_follow_up_at", "error_message"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"Invalid outreach fields: {sorted(unknown)}")
+
+    # Load current row for business‑logic checks (attempt_count, timestamps).
+    cur_row = get_outreach_entry_by_id(entry_id, db_path)
+    if not cur_row:
+        return False
+
+    # Prepare updates.
+    set_clauses: list[str] = []
+    params: list = []
+    now = utc_now()
+
+    # Handle status transition logic.
+    if "outreach_status" in fields:
+        new_status = fields["outreach_status"]
+        if new_status not in OUTREACH_STATUSES:
+            raise ValueError(f"Invalid outreach_status: {new_status}")
+        old_status = cur_row["outreach_status"]
+        # Increment attempt_count only when entering PROCESSING from a non‑PROCESSING state.
+        if new_status == "PROCESSING" and old_status != "PROCESSING":
+            set_clauses.append("attempt_count = attempt_count + 1")
+            # Record when the attempt actually starts.
+            set_clauses.append("last_contacted_at = ?")
+            params.append(now)
+        # If moving to SENT or FAILED, we keep the existing last_contacted_at (already set when PROCESSING started).
+        # Clear error_message when moving out of FAILED (optional – preserve if you like).
+        if old_status == "FAILED" and new_status != "FAILED":
+            set_clauses.append("error_message = NULL")
+        set_clauses.append("outreach_status = ?")
+        params.append(new_status)
+    # next_follow_up_at and error_message are direct assignments if present.
+    if "next_follow_up_at" in fields:
+        set_clauses.append("next_follow_up_at = ?")
+        params.append(fields["next_follow_up_at"])
+    if "error_message" in fields:
+        set_clauses.append("error_message = ?")
+        params.append(fields["error_message"])
+
+    # Always bump updated_at.
+    set_clauses.append("updated_at = ?")
+    params.append(now)
+
+    set_clause = ", ".join(set_clauses)
+    sql = f"UPDATE outreach_queue SET {set_clause} WHERE id = ?"
+    params.append(entry_id)
+
+    with get_connection(db_path) as conn:
+        cur = conn.execute(sql, params)
+        return cur.rowcount > 0
+
+def delete_outreach_entry(entry_id: int, db_path: Path | str = DB_PATH) -> bool:
+    """Delete an outreach entry if it is in a cancellable state.
+
+    Cancellable states are ``PENDING`` and ``FAILED``. Returns ``True`` when a row
+    was removed.
+    """
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "DELETE FROM outreach_queue WHERE id = ? AND outreach_status IN ('PENDING','FAILED')",
+            (entry_id,),
+        )
+        return cur.rowcount > 0
+
+# ---------------------------------------------------------------------------
+# Scrape jobs
 # ---------------------------------------------------------------------------
 def upsert_lead(lead: dict, db_path: Path | str = DB_PATH) -> int:
     """Insert or update a lead keyed by ``source_url``.

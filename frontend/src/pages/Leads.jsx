@@ -6,6 +6,7 @@ export default function Leads() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const [leadChannelMap, setLeadChannelMap] = useState({});
   const [filter, setFilter] = useState('ALL');
   const [sortOrder, setSortOrder] = useState('HIGH_TO_LOW');
 
@@ -189,33 +190,73 @@ export default function Leads() {
           </thead>
 
           <tbody>
-            {displayLeads.map((lead) => (
-              <tr key={lead.id}>
-                <td>{lead.id}</td>
-                <td>{lead.company_name || '-'}</td>
-                <td>{lead.website || lead.source_url || '-'}</td>
-                <td>{lead.email || '-'}</td>
-                <td>{lead.phone || '-'}</td>
-                <td>{lead.quality_score}</td>
-                <td>{lead.data_quality}</td>
-                <td>{lead.status || '-'}</td>
-                <td>
-                  <select
-                    value={lead.lead_status || 'NEW'}
-                    onChange={(e) =>
-                      handleLeadStatusChange(lead.id, e.target.value)
-                    }
-                  >
-                    <option value="NEW">NEW</option>
-                    <option value="QUALIFIED">QUALIFIED</option>
-                    <option value="CONTACTED">CONTACTED</option>
-                    <option value="INTERESTED">INTERESTED</option>
-                    <option value="CONVERTED">CONVERTED</option>
-                    <option value="REJECTED">REJECTED</option>
-                  </select>
-                </td>
-              </tr>
-            ))}
+            {displayLeads.map((lead) => {
+              const selectedChannel = leadChannelMap[lead.id] || 'EMAIL';
+              const isEligible =
+                (lead.lead_status === 'QUALIFIED' || lead.lead_status === 'INTERESTED') &&
+                ((selectedChannel === 'EMAIL' && lead.email) ||
+                  ((selectedChannel === 'WHATSAPP' || selectedChannel === 'CALL') && lead.phone));
+              const handleChannelChange = (e) => {
+                const newChannel = e.target.value;
+                setLeadChannelMap((prev) => ({ ...prev, [lead.id]: newChannel }));
+              };
+              const handleAddToOutreach = async () => {
+                try {
+                  await api.post('/outreach', {
+                    lead_id: lead.id,
+                    outreach_channel: selectedChannel,
+                  });
+                  // Refresh leads after successful queue creation
+                  await loadLeads(true);
+                } catch (err) {
+                  setError(err.response?.data?.error || 'Failed to add to outreach queue');
+                }
+              };
+              return (
+                <tr key={lead.id}>
+                  <td>{lead.id}</td>
+                  <td>{lead.company_name || '-'}</td>
+                  <td>{lead.website || lead.source_url || '-'}</td>
+                  <td>{lead.email || '-'}</td>
+                  <td>{lead.phone || '-'}</td>
+                  <td>{lead.quality_score}</td>
+                  <td>{lead.data_quality}</td>
+                  <td>{lead.status || '-'}</td>
+                  <td>
+                    <select
+                      value={lead.lead_status || 'NEW'}
+                      onChange={(e) =>
+                        handleLeadStatusChange(lead.id, e.target.value)
+                      }
+                    >
+                      <option value="NEW">NEW</option>
+                      <option value="QUALIFIED">QUALIFIED</option>
+                      <option value="CONTACTED">CONTACTED</option>
+                      <option value="INTERESTED">INTERESTED</option>
+                      <option value="CONVERTED">CONVERTED</option>
+                      <option value="REJECTED">REJECTED</option>
+                    </select>
+                    <br />
+                    <select
+                      value={selectedChannel}
+                      onChange={handleChannelChange}
+                    >
+                      <option value="EMAIL">EMAIL</option>
+                      <option value="WHATSAPP">WHATSAPP</option>
+                      <option value="CALL">CALL</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleAddToOutreach}
+                      disabled={!isEligible}
+                      style={{ marginLeft: '4px' }}
+                    >
+                      Add to Outreach
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}

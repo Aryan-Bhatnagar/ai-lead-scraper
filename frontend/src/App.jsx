@@ -4,6 +4,7 @@ import Overview from './pages/Overview';
 import NewScrapeJob from './pages/NewScrapeJob';
 import ScrapeJobs from './pages/ScrapeJobs';
 import Leads from './pages/Leads';
+import OutreachQueue from './pages/OutreachQueue';
 
 const Nav = () => {
   const activeStyle = { textDecoration: 'underline', fontWeight: 'bold' };
@@ -21,6 +22,9 @@ const Nav = () => {
       <NavLink to="/leads" style={({ isActive }) => (isActive ? activeStyle : undefined)}>
         Leads
       </NavLink>
+      <NavLink to="/outreach" style={({ isActive }) => (isActive ? activeStyle : undefined)}>
+        Outreach Queue
+      </NavLink>
     </nav>
   );
 };
@@ -36,6 +40,7 @@ export default function App() {
           <Route path="/new" element={<NewScrapeJob />} />
           <Route path="/jobs" element={<ScrapeJobs />} />
           <Route path="/leads" element={<Leads />} />
+                <Route path="/outreach" element={<OutreachQueue />} />
         </Routes>
       </main>
     </BrowserRouter>

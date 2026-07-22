@@ -190,6 +190,88 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         return jsonify(lead), 200
 
     # -------------------------------------------------------------------
+    # Outreach Queue endpoints (Phase 10B)
+    # -------------------------------------------------------------------
+    @app.route("/api/outreach", methods=["GET"])
+    def list_outreach():
+        lead_id = request.args.get("lead_id", type=int)
+        channel = request.args.get("outreach_channel")
+        status = request.args.get("outreach_status")
+        entries = db.get_outreach_entries(
+            app.config["DATABASE"], lead_id=lead_id, outreach_channel=channel, outreach_status=status
+        )
+        return jsonify({"outreach": entries, "count": len(entries)})
+
+    @app.route("/api/outreach", methods=["POST"])
+    def create_outreach():
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+        lead_id = payload.get("lead_id")
+        channel = payload.get("outreach_channel")
+        next_follow_up = payload.get("next_follow_up_at")
+        if lead_id is None or channel is None:
+            abort(400, description="'lead_id' and 'outreach_channel' are required")
+        # Validate channel
+        if channel not in db.OUTREACH_CHANNELS:
+            abort(400, description=f"Invalid outreach_channel: {channel}")
+        # Validate lead existence and eligibility
+        lead = db.get_lead_by_id(lead_id, app.config["DATABASE"])  # noqa: E501
+        if not lead:
+            abort(400, description=f"Lead id {lead_id} does not exist")
+        # Eligibility – lead_status must be QUALIFIED or INTERESTED
+        if lead.get("lead_status") not in {"QUALIFIED", "INTERESTED"}:
+            abort(400, description="Lead not eligible for outreach (status must be QUALIFIED or INTERESTED)")
+        # Contact info checks
+        if channel == "EMAIL" and not lead.get("email"):
+            abort(400, description="Lead missing email for EMAIL outreach")
+        if channel in {"WHATSAPP", "CALL"} and not lead.get("phone"):
+            abort(400, description=f"Lead missing phone for {channel} outreach")
+        # Create entry – underlying function will raise ValueError for duplicate active.
+        try:
+            entry_id = db.create_outreach_entry(
+                lead_id, channel, app.config["DATABASE"], next_follow_up_at=next_follow_up
+            )
+        except ValueError as ve:
+            abort(400, description=str(ve))
+        entry = db.get_outreach_entry_by_id(entry_id, app.config["DATABASE"])
+        return jsonify(entry), 201
+
+    @app.route("/api/outreach/<int:queue_id>", methods=["PATCH"])
+    def patch_outreach(queue_id: int):
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+        # Only allow known mutable fields – the helper will validate further.
+        try:
+            updated = db.update_outreach_entry(queue_id, app.config["DATABASE"], **payload)
+        except ValueError as ve:
+            abort(400, description=str(ve))
+        if not updated:
+            abort(404, description="Outreach entry not found")
+        entry = db.get_outreach_entry_by_id(queue_id, app.config["DATABASE"])
+        return jsonify(entry), 200
+
+    @app.route("/api/outreach/<int:queue_id>", methods=["DELETE"])
+    def delete_outreach(queue_id: int):
+        # Only allow deletion of PENDING or FAILED entries – logic inside DB helper.
+        deleted = db.delete_outreach_entry(queue_id, app.config["DATABASE"])
+        if not deleted:
+            abort(400, description="Outreach entry cannot be deleted (must be PENDING or FAILED)")
+        return jsonify({"deleted": True}), 200
+    # -------------------------------------------------------------------
     # Jobs endpoints
     # -------------------------------------------------------------------
     @app.route("/api/jobs", methods=["GET"])
