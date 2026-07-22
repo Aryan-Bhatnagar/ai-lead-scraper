@@ -408,6 +408,71 @@ def delete_outreach_entry(entry_id: int, db_path: Path | str = DB_PATH) -> bool:
             (entry_id,),
         )
         return cur.rowcount > 0
+def start_dispatch(entry_id: int, db_path: Path | str = DB_PATH) -> bool:
+    """Transition a PENDING or FAILED outreach entry to PROCESSING."""
+    now = utc_now()
+
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE outreach_queue
+            SET outreach_status = 'PROCESSING',
+                attempt_count = attempt_count + 1,
+                last_contacted_at = ?,
+                error_message = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND outreach_status IN ('PENDING', 'FAILED')
+            """,
+            (now, now, entry_id),
+        )
+        return cursor.rowcount > 0
+
+
+def mark_dispatch_success(
+    entry_id: int,
+    db_path: Path | str = DB_PATH,
+) -> bool:
+    """Transition a PROCESSING outreach entry to SENT."""
+    now = utc_now()
+
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE outreach_queue
+            SET outreach_status = 'SENT',
+                error_message = NULL,
+                updated_at = ?
+            WHERE id = ?
+              AND outreach_status = 'PROCESSING'
+            """,
+            (now, entry_id),
+        )
+        return cursor.rowcount > 0
+
+
+def mark_dispatch_failure(
+    entry_id: int,
+    db_path: Path | str = DB_PATH,
+    error_msg: str | None = None,
+) -> bool:
+    """Transition a PROCESSING outreach entry to FAILED."""
+    now = utc_now()
+
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE outreach_queue
+            SET outreach_status = 'FAILED',
+                error_message = ?,
+                updated_at = ?
+            WHERE id = ?
+              AND outreach_status = 'PROCESSING'
+            """,
+            (error_msg, now, entry_id),
+        )
+        return cursor.rowcount > 0
+
 
 # ---------------------------------------------------------------------------
 # Scrape jobs

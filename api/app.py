@@ -30,6 +30,8 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from flask import Flask, jsonify, request, abort
 import json
+import os
+import requests
 from urllib.parse import urlparse
 from flask_cors import CORS
 
@@ -271,6 +273,84 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         if not deleted:
             abort(400, description="Outreach entry cannot be deleted (must be PENDING or FAILED)")
         return jsonify({"deleted": True}), 200
+
+    @app.route("/api/outreach/<int:queue_id>/dispatch", methods=["POST"])
+    def dispatch_outreach(queue_id: int):
+        webhook_url = os.getenv("OUTREACH_WEBHOOK_URL")
+        if not webhook_url:
+            return jsonify({
+                "error": "OUTREACH_WEBHOOK_URL is not configured"
+            }), 500
+
+        entry = db.get_outreach_entry_by_id(
+            queue_id, app.config["DATABASE"]
+        )
+        if not entry:
+            abort(404, description="Outreach entry not found")
+
+        if entry["outreach_status"] not in {"PENDING", "FAILED"}:
+            abort(
+                400,
+                description=(
+                    "Outreach entry cannot be dispatched "
+                    "in its current state"
+                ),
+            )
+
+        lead = db.get_lead_by_id(
+            entry["lead_id"], app.config["DATABASE"]
+        )
+        if not lead:
+            return jsonify({
+                "error": "Associated lead not found"
+            }), 500
+
+        payload = {
+            "queue_id": entry["id"],
+            "lead_id": entry["lead_id"],
+            "company_name": lead.get("company_name"),
+            "contact_name": lead.get("contact_name"),
+            "contact_role": lead.get("contact_role"),
+            "email": lead.get("email"),
+            "phone": lead.get("phone"),
+            "website": lead.get("website"),
+            "outreach_channel": entry["outreach_channel"],
+            "outreach_status": entry["outreach_status"],
+        }
+
+        if not db.start_dispatch(
+            queue_id, app.config["DATABASE"]
+        ):
+            return jsonify({
+                "error": "Failed to start dispatch"
+            }), 500
+
+        try:
+            response = requests.post(
+                webhook_url,
+                json=payload,
+                timeout=10,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            db.mark_dispatch_failure(
+                queue_id,
+                app.config["DATABASE"],
+                error_msg=str(exc),
+            )
+            return jsonify({
+                "error": f"Webhook dispatch failed: {exc}"
+            }), 502
+
+        db.mark_dispatch_success(
+            queue_id, app.config["DATABASE"]
+        )
+
+        entry = db.get_outreach_entry_by_id(
+            queue_id, app.config["DATABASE"]
+        )
+        return jsonify(entry), 200
+
     # -------------------------------------------------------------------
     # Jobs endpoints
     # -------------------------------------------------------------------

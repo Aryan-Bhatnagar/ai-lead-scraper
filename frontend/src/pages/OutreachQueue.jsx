@@ -25,6 +25,8 @@ export default function OutreachQueue() {
     loadEntries();
   }, [loadEntries]);
 
+  const [dispatchingId, setDispatchingId] = useState(null);
+
   const handleDelete = async (id) => {
     try {
       await api.delete(`/outreach/${id}`);
@@ -34,6 +36,20 @@ export default function OutreachQueue() {
       setError(err.response?.data?.error || 'Failed to delete outreach entry.');
     }
   };
+
+  const handleDispatch = async (id) => {
+  setDispatchingId(id);
+  setError('');
+
+  try {
+    await api.post(`/outreach/${id}/dispatch`);
+    await loadEntries();
+  } catch (err) {
+    setError(err.response?.data?.error || 'Failed to dispatch outreach.');
+  } finally {
+    setDispatchingId(null);
+  }
+};
 
   if (loading) {
     return <p>Loading outreach queue...</p>;
@@ -79,8 +95,8 @@ export default function OutreachQueue() {
                 <td>{e.error_message || '-'}</td>
                 <td>
                   {(e.outreach_status === 'PENDING' || e.outreach_status === 'FAILED') && (
-                    <button type="button" onClick={() => handleDelete(e.id)}>
-                      Delete
+                    <button type="button" onClick={() => handleDispatch(e.id)}>
+                      Dispatch
                     </button>
                   )}
                 </td>
