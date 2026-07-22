@@ -15,14 +15,15 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Default database location – tests override this via ``set_database_path``.
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "leads.db"
-
 
 def set_database_path(path: str | Path) -> None:
     """Override the default database path.
 
-    The tests pass a temporary SQLite file so API factories use the
-    configured path without creating/reading the production database.
+    The test suite creates a temporary SQLite file and passes its path via the
+    ``DATABASE`` Flask config key.  This helper makes it easy for the code to
+    honour that override without touching production data.
     """
     global DB_PATH
     DB_PATH = Path(path)
@@ -56,6 +57,16 @@ LEAD_COLUMNS = [
     "error",
 ]
 
+# CRM lead lifecyle statuses – independent of the scraper ``status`` field.
+LEAD_STATUSES = {
+    "NEW",
+    "QUALIFIED",
+    "CONTACTED",
+    "INTERESTED",
+    "CONVERTED",
+    "REJECTED",
+}
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,6 +91,7 @@ CREATE TABLE IF NOT EXISTS leads (
     quality_score INTEGER,
     data_quality TEXT,
     error TEXT,
+    lead_status TEXT NOT NULL DEFAULT 'NEW',
     created_at TEXT,
     updated_at TEXT
 );
@@ -114,18 +126,24 @@ CREATE TABLE IF NOT EXISTS scrape_job_items (
 CREATE INDEX IF NOT EXISTS idx_leads_source_url ON leads(source_url);
 CREATE INDEX IF NOT EXISTS idx_leads_data_quality ON leads(data_quality);
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_lead_status ON leads(lead_status);
 CREATE INDEX IF NOT EXISTS idx_job_items_job_id ON scrape_job_items(job_id);
 """
 
 
 def utc_now() -> str:
+    """Return the current UTC timestamp as an ISO‑8601 string (seconds precision)."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 @contextmanager
 def get_connection(db_path: Path | str = DB_PATH):
-    """Connection context manager: foreign keys on, dict-like rows,
-    commit on success / rollback on error, always closed afterwards."""
+    """Connection context manager.
+
+    * Enables foreign‑key constraints.
+    * Returns ``sqlite3.Row`` objects for dict‑like access.
+    * Commits on success, rolls back on exception.
+    """
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
@@ -141,19 +159,58 @@ def get_connection(db_path: Path | str = DB_PATH):
 
 
 def initialize_database(db_path: Path | str = DB_PATH) -> None:
-    """Create tables and indexes if they don't exist. Safe to call always."""
-    with get_connection(db_path) as conn:
-        conn.executescript(SCHEMA)
+    """Create tables and indexes if they don't exist.
 
+    This function is idempotent – it can be called on every app start.  It also
+    performs a lightweight migration for older databases that lack the
+    ``lead_status`` column.
+
+    The migration runs **before** any ``CREATE INDEX`` statements that refer to
+    ``lead_status``.  Older databases contain the ``leads`` table without the
+    ``lead_status`` column, but the ``SCHEMA`` script creates the index on that
+    column *after* the ``CREATE TABLE`` block, causing ``sqlite3.OperationalError``
+    ``no such column: lead_status`` during initialization.  We now catch that
+    error, add the column, and retry the script so that the indexes can be
+    created safely.
+    """
+    with get_connection(db_path) as conn:
+        try:
+            # Try the full schema first – on a brand‑new DB this succeeds.
+            conn.executescript(SCHEMA)
+        except sqlite3.OperationalError as e:
+            # If the error is caused by the missing ``lead_status`` column,
+            # add the column and retry the script.
+            if "no such column: lead_status" in str(e):
+                conn.execute(
+                    "ALTER TABLE leads ADD COLUMN lead_status TEXT NOT NULL DEFAULT 'NEW'"
+                )
+                conn.executescript(SCHEMA)
+            else:
+                # Unexpected error – re‑raise.
+                raise
+
+        # Ensure ``lead_status`` exists for the case where the schema ran
+        # successfully but the column is still missing (e.g., a DB that was
+        # created with a schema that omitted the column but did not have the
+        # failing index). This makes the migration truly idempotent.
+        cur = conn.execute("PRAGMA table_info(leads)")
+        cols = {row["name"] for row in cur.fetchall()}
+        if "lead_status" not in cols:
+            conn.execute(
+                "ALTER TABLE leads ADD COLUMN lead_status TEXT NOT NULL DEFAULT 'NEW'"
+            )
 
 # ---------------------------------------------------------------------------
 # Leads
 # ---------------------------------------------------------------------------
 def upsert_lead(lead: dict, db_path: Path | str = DB_PATH) -> int:
-    """Insert or update a lead keyed by source_url.
+    """Insert or update a lead keyed by ``source_url``.
 
-    A re-scraped source_url updates the existing row (no duplicate),
-    preserves created_at, and refreshes updated_at. Returns the lead id.
+    * If the ``source_url`` already exists the row is updated – **only** the
+      columns listed in :data:`LEAD_COLUMNS` are touched.  ``lead_status`` is
+      deliberately omitted so manual CRM updates survive rescrapes.
+    * ``created_at`` is set on insert, ``updated_at`` on both insert and
+      update.
     """
     if not lead.get("source_url"):
         raise ValueError("upsert_lead requires a non-empty source_url")
@@ -168,7 +225,7 @@ def upsert_lead(lead: dict, db_path: Path | str = DB_PATH) -> int:
     update_clause = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
 
     with get_connection(db_path) as conn:
-        cur = conn.execute(
+        conn.execute(
             f"""
             INSERT INTO leads ({columns}, created_at, updated_at)
             VALUES ({placeholders}, :now, :now)
@@ -192,7 +249,7 @@ def get_lead_by_source_url(source_url: str, db_path: Path | str = DB_PATH) -> di
         return dict(row) if row else None
 
 def get_lead_by_id(lead_id: int, db_path: Path | str = DB_PATH) -> dict | None:
-    """Return a lead row by primary key id or None if not found."""
+    """Return a lead row by primary key ``id`` or ``None`` if not found."""
     with get_connection(db_path) as conn:
         row = conn.execute(
             "SELECT * FROM leads WHERE id = ?", (lead_id,)
@@ -207,17 +264,36 @@ def get_all_leads(db_path: Path | str = DB_PATH) -> list[dict]:
 
 
 def delete_lead(lead_id: int, db_path: Path | str = DB_PATH) -> bool:
-    """Delete a lead by id. Returns True if a row was deleted."""
+    """Delete a lead; returns ``True`` if a row was removed."""
     with get_connection(db_path) as conn:
         cur = conn.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
         return cur.rowcount > 0
 
 
+def update_lead_status(lead_id: int, lead_status: str, db_path: Path | str = DB_PATH) -> bool:
+    """Update the CRM ``lead_status`` for a lead.
+
+    * ``lead_status`` must be one of :data:`LEAD_STATUSES` – otherwise a
+      ``ValueError`` is raised.
+    * ``updated_at`` is refreshed to the current timestamp.
+    * Returns ``True`` when a row was updated, ``False`` when the ``lead_id``
+      does not exist.
+    """
+    if lead_status not in LEAD_STATUSES:
+        raise ValueError(f"Invalid lead_status: {lead_status}")
+    now = utc_now()
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE leads SET lead_status = ?, updated_at = ? WHERE id = ?",
+            (lead_status, now, lead_id),
+        )
+        return cur.rowcount > 0
+
 # ---------------------------------------------------------------------------
 # Scrape jobs
 # ---------------------------------------------------------------------------
 def create_scrape_job(urls: list[str], db_path: Path | str = DB_PATH) -> int:
-    """Create a queued job plus one queued item per URL. Returns job id."""
+    """Create a queued job plus one queued item per URL. Returns the job id."""
     now = utc_now()
     with get_connection(db_path) as conn:
         cur = conn.execute(
@@ -275,7 +351,7 @@ def update_job_item(
     error: str = "",
     db_path: Path | str = DB_PATH,
 ) -> None:
-    """Update one job item's status; stamps started_at/completed_at."""
+    """Update one job item's status; stamps ``started_at``/``completed_at`` as appropriate."""
     if status not in JOB_ITEM_STATUSES:
         raise ValueError(f"Invalid job item status: {status}")
     now = utc_now()

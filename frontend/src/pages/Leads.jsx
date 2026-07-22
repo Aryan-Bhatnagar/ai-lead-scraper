@@ -26,6 +26,8 @@ export default function Leads() {
           lead.data_quality && lead.data_quality.trim()
             ? lead.data_quality.toUpperCase()
             : 'NONE',
+        // Ensure the CRM lead_status field is always present.
+        lead_status: lead.lead_status || 'NEW',
       }));
 
       setAllLeads(normalized);
@@ -42,6 +44,24 @@ export default function Leads() {
       }
     }
   }, []);
+
+  const handleLeadStatusChange = async (leadId, newStatus) => {
+    try {
+      const resp = await api.patch(`/leads/${leadId}/status`, {
+        lead_status: newStatus,
+      });
+      // The API returns the full updated lead object.
+      const updatedLead = resp.data;
+      setAllLeads((prev) =>
+        prev.map((l) => (l.id === leadId ? { ...l, ...updatedLead } : l))
+      );
+    } catch (err) {
+      setError(
+        err.response?.data?.error ||
+          `Failed to update lead status for lead ${leadId}.`
+      );
+    }
+  };
 
   const counters = useMemo(() => {
     const high = allLeads.filter(
@@ -163,7 +183,8 @@ export default function Leads() {
               <th>Phone</th>
               <th>Quality Score</th>
               <th>Data Quality</th>
-              <th>Status</th>
+              <th>Scrape Status</th>
+              <th>Lead Status</th>
             </tr>
           </thead>
 
@@ -178,6 +199,21 @@ export default function Leads() {
                 <td>{lead.quality_score}</td>
                 <td>{lead.data_quality}</td>
                 <td>{lead.status || '-'}</td>
+                <td>
+                  <select
+                    value={lead.lead_status || 'NEW'}
+                    onChange={(e) =>
+                      handleLeadStatusChange(lead.id, e.target.value)
+                    }
+                  >
+                    <option value="NEW">NEW</option>
+                    <option value="QUALIFIED">QUALIFIED</option>
+                    <option value="CONTACTED">CONTACTED</option>
+                    <option value="INTERESTED">INTERESTED</option>
+                    <option value="CONVERTED">CONVERTED</option>
+                    <option value="REJECTED">REJECTED</option>
+                  </select>
+                </td>
               </tr>
             ))}
           </tbody>

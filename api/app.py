@@ -1,13 +1,14 @@
-"""Flask application factory for AI Lead Scraper.
+"""
+Flask application factory for AI Lead Scraper.
 
 This module implements a fully‑fledged Flask app that
 * reads configuration from a supplied dictionary,
 * attaches CORS for development, and
 * exposes a small REST API for leads and scrape jobs.
 
-Only thin wrappers around :mod:`scraper.database` are used – the
-actual database access logic lives there so the tests can monkey‑patch
-the database path.
+Only thin wrappers around :mod:`scraper.database` are used – the actual
+database access logic lives there so the tests can monkey‑patch the database
+path.
 
 The factory accepts a ``config`` mapping which may specify:
     - ``TESTING`` – makes the returned app suitable for unit tests;
@@ -18,8 +19,8 @@ All endpoints return JSON with appropriate status codes and use
 parameterized SQL to avoid injection.
 
 The file intentionally contains no ``if __name__ == "__main__"``
-block – the application is started through the standard WSGI
-frontend used by the tests.
+block – the application is started through the standard WSGI frontend used
+by the tests.
 """
 
 from __future__ import annotations
@@ -41,16 +42,23 @@ import scraper.database as db
 from scraper.lead_discovery import discover_leads
 
 # ---------------------------------------------------------------------------
-# Helper functions – thin wrappers that delegate to the database module.  The
-# database module exposes ``get_lead_by_id`` and ``get_all_scrape_jobs``.  We add
-# a ``get_leads`` that supports optional filtering.
+# Helper functions – thin wrappers that delegate to the database module.
+# The database module exposes ``get_lead_by_id`` and ``update_lead_status``.
+# We add ``get_leads`` that supports optional filtering by the scraper ``status``,
+# the CRM ``lead_status`` and ``data_quality`` fields.
 # ---------------------------------------------------------------------------
 
-def get_leads(db_path: Path | str, filter_status: str | None = None, filter_q: str | None = None) -> List[Dict[str, Any]]:
-    """Return all leads, optionally filtered by status or data quality.
-
-    The helper accepts ``None`` for a missing filter, matching the API
-    behaviour.
+def get_leads(
+    db_path: Path | str,
+    filter_status: str | None = None,
+    filter_q: str | None = None,
+    filter_lead_status: str | None = None,
+) -> List[Dict[str, Any]]:
+    """Return all leads, optionally filtered by:
+    * ``status`` – the scraper‑generated status field,
+    * ``data_quality`` – the quality bucket,
+    * ``lead_status`` – the new CRM lifecycle status.
+    ``None`` for any filter means no filtering on that column.
     """
     query = "SELECT * FROM leads"
     clauses: List[str] = []
@@ -61,6 +69,9 @@ def get_leads(db_path: Path | str, filter_status: str | None = None, filter_q: s
     if filter_q:
         clauses.append("data_quality = ?")
         params.append(filter_q)
+    if filter_lead_status:
+        clauses.append("lead_status = ?")
+        params.append(filter_lead_status)
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
     with db.get_connection(db_path) as conn:
@@ -104,15 +115,19 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     def health():  # pragma: no cover - trivial
         return jsonify({"status": "ok"})
 
-    # --- Leads ------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # Leads endpoints
+    # -------------------------------------------------------------------
     @app.route("/api/leads", methods=["GET"])
     def list_leads():
         status = request.args.get("status")
         q = request.args.get("data_quality")
+        lead_status = request.args.get("lead_status")
         leads = get_leads(
             app.config["DATABASE"],
             status,
             q,
+            lead_status,
         )
         return jsonify({"leads": leads, "count": len(leads)})
 
@@ -138,7 +153,45 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
 
         return jsonify({"deleted": True})
 
-    # --- Jobs ------------------------------------------------------------
+    # -------------------------------------------------------------------
+    # PATCH endpoint for CRM lead_status
+    # -------------------------------------------------------------------
+    @app.route("/api/leads/<int:lead_id>/status", methods=["PATCH"])
+    def patch_lead_status(lead_id: int):
+        # Expect a JSON body with a ``lead_status`` field.
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+        lead_status = payload.get("lead_status")
+        if lead_status is None:
+            abort(400, description="Missing 'lead_status' field")
+        # Validate against the allowed set defined in ``scraper.database``.
+        if lead_status not in db.LEAD_STATUSES:
+            abort(400, description=f"Invalid lead_status: {lead_status}")
+        # Attempt the update.
+        updated = db.update_lead_status(
+            lead_id,
+            lead_status,
+            app.config["DATABASE"],
+        )
+        if not updated:
+            abort(404, description="Lead not found")
+        # Return the updated lead for convenience.
+        lead = db.get_lead_by_id(
+            lead_id,
+            app.config["DATABASE"],
+        )
+        return jsonify(lead), 200
+
+    # -------------------------------------------------------------------
+    # Jobs endpoints
+    # -------------------------------------------------------------------
     @app.route("/api/jobs", methods=["GET"])
     def list_jobs():
         with db.get_connection(app.config["DATABASE"]) as conn:
@@ -230,7 +283,11 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             abort(400, description="'max_results' must be between 1 and 50")
         # Run discovery
         try:
-            results = discover_leads(industry=industry, location=location, max_results=max_results)
+            results = discover_leads(
+                industry=industry,
+                location=location,
+                max_results=max_results,
+            )
         except Exception:
             app.logger.exception("Lead discovery failed")
             return jsonify({"error": "Lead discovery failed"}), 500
@@ -279,7 +336,9 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             items = [dict(row) for row in cursor.fetchall()]
         return jsonify({"items": items, "count": len(items)})
 
-    # --- Lead Discovery -----------------------------------------------------
+    # -------------------------------------------------------------------
+    # Lead discovery endpoint (unchanged from Phase 8C)
+    # -------------------------------------------------------------------
     @app.route("/api/discover", methods=["POST"])
     def discover():
         # Step 1: Ensure a request body exists
