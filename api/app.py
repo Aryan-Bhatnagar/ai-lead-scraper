@@ -352,6 +352,28 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         return jsonify(entry), 200
 
     # -------------------------------------------------------------------
+    # Automated outreach batch processor (Phase 11A)
+    # -------------------------------------------------------------------
+    @app.route("/api/outreach/process", methods=["POST"])
+    def process_outreach_batch():
+        # Configuration – limit of entries per batch and retry ceiling.
+        batch_limit = app.config.get("OUTREACH_BATCH_LIMIT", 10)
+        retry_limit = app.config.get("OUTREACH_MAX_RETRY", 3)
+        # Ensure the webhook URL is configured before any work.
+        if not os.getenv("OUTREACH_WEBHOOK_URL"):
+            return jsonify({
+                "error": "OUTREACH_WEBHOOK_URL is not configured"
+            }), 500
+        # Import the shared service (local import to avoid circular at module load).
+        from scraper import outreach_service as out_srv
+        summary = out_srv.process_batch(
+            limit=batch_limit,
+            retry_limit=retry_limit,
+            db_path=app.config["DATABASE"],
+        )
+        return jsonify(summary), 200
+
+    # -------------------------------------------------------------------
     # Jobs endpoints
     # -------------------------------------------------------------------
     @app.route("/api/jobs", methods=["GET"])
