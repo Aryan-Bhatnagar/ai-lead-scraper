@@ -719,6 +719,122 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             "location": location,
             "source": "free_web"
         }), 200
+
+    # ---------------------------------------------------------------------
+    # Lead enrichment endpoint (Phase 12C)
+    # ---------------------------------------------------------------------
+    @app.route("/api/leads/enrich", methods=["POST"])
+    def enrich_leads_endpoint():
+        # Step 1: Ensure a request body exists
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        # Step 2: Parse JSON
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+        # Step 3: Validate 'leads' field
+        if "leads" not in payload:
+            abort(400, description="Missing 'leads' field")
+        leads = payload["leads"]
+        if not isinstance(leads, list):
+            abort(400, description="'leads' must be a list")
+        if len(leads) == 0:
+            abort(400, description="'leads' list cannot be empty")
+        # Step 4: Validate each lead
+        for i, lead in enumerate(leads):
+            if not isinstance(lead, dict):
+                abort(400, description=f"Lead at index {i} must be an object")
+            if "website" not in lead or not lead["website"] or not isinstance(lead["website"], str):
+                abort(400, description=f"Lead at index {i} must have a non-empty 'website' string")
+            # Optional: validate website format
+            website = lead["website"].strip()
+            if not website.lower().startswith(("http://", "https://")):
+                # We'll still allow it as it will be normalized in enrichment
+                pass
+        # Step 5: Run enrichment
+        try:
+            from scraper.lead_enrichment import enrich_leads
+            enriched_leads = enrich_leads(leads)
+        except Exception as exc:
+            app.logger.exception("Lead enrichment failed")
+            return jsonify({"error": str(exc)}), 500
+        # Step 6: Return results
+        return jsonify({
+            "results": enriched_leads,
+            "count": len(enriched_leads)
+        }), 200
+
+    # ---------------------------------------------------------------------
+    # Free discovery + enrichment endpoint (Phase 12C)
+    # ---------------------------------------------------------------------
+    @app.route("/api/discover/free-and-enrich", methods=["POST"])
+    def discover_free_and_enrich_endpoint():
+        # Step 1: Ensure a request body exists
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        # Step 2: Parse JSON
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+        # Step 3: Validate industry
+        if "industry" not in payload:
+            abort(400, description="Missing 'industry' field")
+        industry = payload["industry"]
+        if not isinstance(industry, str):
+            abort(400, description="'industry' must be a string")
+        industry = industry.strip()
+        if not industry:
+            abort(400, description="'industry' cannot be empty")
+        # Step 4: Validate location
+        if "location" not in payload:
+            abort(400, description="Missing 'location' field")
+        location = payload["location"]
+        if not isinstance(location, str):
+            abort(400, description="'location' must be a string")
+        location = location.strip()
+        if not location:
+            abort(400, description="'location' cannot be empty")
+        # Step 5: Validate max_results
+        max_results = payload.get("max_results", 10)
+        if not isinstance(max_results, int) or isinstance(max_results, bool):
+            abort(400, description="'max_results' must be an integer")
+        if max_results < 1 or max_results > 50:
+            abort(400, description="'max_results' must be between 1 and 50")
+        # Step 6: Run free discovery
+        try:
+            from scraper.free_lead_discovery import discover_free_leads
+            discovered_leads = discover_free_leads(
+                industry=industry,
+                location=location,
+                max_results=max_results,
+            )
+        except Exception as exc:
+            app.logger.exception("Free lead discovery failed")
+            return jsonify({"error": str(exc)}), 500
+        # Step 7: Run enrichment on discovered leads
+        try:
+            from scraper.lead_enrichment import enrich_leads
+            enriched_leads = enrich_leads(discovered_leads)
+        except Exception as exc:
+            app.logger.exception("Lead enrichment failed")
+            return jsonify({"error": str(exc)}), 500
+        # Step 8: Return results
+        return jsonify({
+            "results": enriched_leads,
+            "count": len(enriched_leads),
+            "industry": industry,
+            "location": location,
+            "source": "free_web"
+        }), 200
+
     # ---------------------------------------------------------------------
     @app.errorhandler(404)
     def resource_not_found(e):  # pragma: no cover
