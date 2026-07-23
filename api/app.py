@@ -42,6 +42,7 @@ from flask_cors import CORS
 import scraper.database as db
 
 from scraper.lead_discovery import discover_leads
+from scraper.google_maps_discovery import discover_google_maps
 
 # ---------------------------------------------------------------------------
 # Helper functions – thin wrappers that delegate to the database module.
@@ -603,6 +604,61 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
 
     # ---------------------------------------------------------------------
     # Error handling – return JSON, hide stack traces.
+
+    @app.route("/api/discover/google-maps", methods=["POST"])
+    def discover_google_maps_endpoint():
+        # Step 1: Ensure a request body exists
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        # Step 2: Parse JSON
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+        # Step 3: Validate industry
+        if "industry" not in payload:
+            abort(400, description="Missing 'industry' field")
+        industry = payload["industry"]
+        if not isinstance(industry, str):
+            abort(400, description="'industry' must be a string")
+        industry = industry.strip()
+        if not industry:
+            abort(400, description="'industry' cannot be empty")
+        # Step 4: Validate location
+        if "location" not in payload:
+            abort(400, description="Missing 'location' field")
+        location = payload["location"]
+        if not isinstance(location, str):
+            abort(400, description="'location' must be a string")
+        location = location.strip()
+        if not location:
+            abort(400, description="'location' cannot be empty")
+        # Step 5: Validate max_results
+        max_results = payload.get("max_results", 10)
+        if not isinstance(max_results, int) or isinstance(max_results, bool):
+            abort(400, description="'max_results' must be an integer")
+        if max_results < 1 or max_results > 50:
+            abort(400, description="'max_results' must be between 1 and 50")
+        # Step 6: Run Google Maps discovery
+        try:
+            results = discover_google_maps(
+                industry=industry,
+                location=location,
+                max_results=max_results,
+            )
+        except Exception as exc:
+            app.logger.exception("Google Maps discovery failed")
+            return jsonify({"error": str(exc)}), 500
+        # Step 7: Return normalized results
+        return jsonify({
+            "results": results,
+            "count": len(results),
+            "industry": industry,
+            "location": location,
+        }), 200
     # ---------------------------------------------------------------------
     @app.errorhandler(404)
     def resource_not_found(e):  # pragma: no cover
