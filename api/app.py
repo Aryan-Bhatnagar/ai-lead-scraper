@@ -769,6 +769,49 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         }), 200
 
     # ---------------------------------------------------------------------
+    # Standalone email extraction endpoint (Phase 12F)
+    # ---------------------------------------------------------------------
+    @app.route("/api/leads/extract-emails", methods=["POST"])
+    def extract_emails_endpoint():
+        # Step 1: Ensure a request body exists
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        # Step 2: Parse JSON
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON root must be an object")
+        # Step 3: Validate 'leads' field
+        if "leads" not in payload:
+            abort(400, description="Missing 'leads' field")
+        leads = payload["leads"]
+        if not isinstance(leads, list):
+            abort(400, description="'leads' must be a list")
+        if len(leads) == 0:
+            abort(400, description="'leads' list cannot be empty")
+        # Step 4: Validate each lead
+        for i, lead in enumerate(leads):
+            if not isinstance(lead, dict):
+                abort(400, description=f"Lead at index {i} must be an object")
+            if "website" not in lead or not lead["website"] or not isinstance(lead["website"], str):
+                abort(400, description=f"Lead at index {i} must have a non-empty 'website' string")
+        # Step 5: Run email extraction
+        try:
+            from scraper.email_extractor import extract_emails_batch
+            results = extract_emails_batch(leads)
+        except Exception as exc:
+            app.logger.exception("Email extraction failed")
+            return jsonify({"error": str(exc)}), 500
+        # Step 6: Return results
+        return jsonify({
+            "results": results,
+            "count": len(results)
+        }), 200
+
+    # ---------------------------------------------------------------------
     # Free discovery + enrichment endpoint (Phase 12C)
     # ---------------------------------------------------------------------
     @app.route("/api/discover/free-and-enrich", methods=["POST"])
