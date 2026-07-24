@@ -34,17 +34,6 @@ from typing import Any, Dict, List
 import requests
 from urllib.parse import urlparse, urlunparse, parse_qs, unquote
 
-from urllib.parse import urlparse, urlunparse
-
-
-# ---------------------------------------------------------------------------
-# Public constants – useful for callers and tests.
-# ---------------------------------------------------------------------------
-API_ENDPOINT = "https://api.duckduckgo.com/"
-HTML_ENDPOINT = "https://duckduckgo.com/html/"
-DEFAULT_MAX_RESULTS = 10
-MAX_ALLOWED_RESULTS = 50
-
 
 # Domains that are useful as directories, social networks, or search results,
 # but should not normally be sent directly to the lead scraper.
@@ -92,9 +81,9 @@ def _validate_inputs(industry: str, location: str, max_results: int) -> None:
 
     if not isinstance(max_results, int) or isinstance(max_results, bool):
         raise ValueError("'max_results' must be an integer")
-    if not (1 <= max_results <= MAX_ALLOWED_RESULTS):
+    if not (1 <= max_results <= 50):
         raise ValueError(
-            f"'max_results' must be between 1 and {MAX_ALLOWED_RESULTS}"
+            f"'max_results' must be between 1 and 50"
         )
 
 
@@ -149,16 +138,17 @@ def _normalize_url(url: str) -> str:
 
         return urlunparse(
             (
-                parsed.scheme.lower(),
-                netloc,
-                "",
-                "",
-                "",
-                "",
+                parsed.scheme.lower(),  # scheme
+                netloc,                 # netloc
+                "",                     # path
+                "",                     # params
+                "",                     # query
+                "",                     # fragment
             )
         )
 
-    except (ValueError, TypeError):
+    except Exception as e:
+        print(f"[NORMALIZE ERROR] {e}")
         return ""
 
 
@@ -209,51 +199,168 @@ def _duckduckgo_html_search(query: str) -> List[Dict[str, Any]]:
     Each dictionary has keys: 'url', 'title', 'snippet'.
     Returns an empty list on failure.
     """
+    # Check if debug mode is enabled via environment variable
+    DEBUG = os.environ.get('DEBUG_FREE_LEAD', '').lower() in ('1', 'true', 'yes')
+
     params = {"q": query}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
 
+    if DEBUG:
+        print(f"[DEBUG] Attempting DuckDuckGo HTML search for query: {query}")
+
     try:
-        response = requests.get(HTML_ENDPOINT, params=params, headers=headers, timeout=10)
+        response = requests.get("https://duckduckgo.com/html/", params=params, headers=headers, timeout=10)
+        if DEBUG:
+            print("=" * 80)
+            print("[DEBUG] DuckDuckGo Request")
+            print("Status:", response.status_code)
+            print("URL:", response.url)
+            print("Content-Type:", response.headers.get("Content-Type"))
+            print("=" * 80)
+
+            print(response.text[:2000])
+
+            print("=" * 80)
+
         response.raise_for_status()
-    except requests.RequestException:
+    except requests.RequestException as e:
+        if DEBUG:
+            print(f"[DEBUG] HTML search request failed: {e}")
         return []
 
-    # Ensure response.text is a string; if not, treat as no HTML and return empty list
+    # Safely obtain HTML body
     html = response.text
-    if not isinstance(html, str):
-        return []
 
-    # Regex to find result links with class "result__url"
-    # Matches: <a class="... result__url ..." href="...">title</a>
-    pattern = r'<a\s+[^>]*class="[^"]*result__url[^"]*"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>'
-    matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
+    # Some unit tests mock requests.Response and response.text may be a MagicMock
+    # instead of an actual string. Treat anything that's not a string as empty HTML.
+    if not isinstance(html, str):
+        if DEBUG:
+            print(f"[DEBUG] response.text is {type(html).__name__}, treating as empty HTML")
+        html = ""
+
+    if DEBUG:
+        # Save the complete HTML response to a temporary file
+        debug_file_path = os.path.join(os.getcwd(), 'ddg_response.html')
+        with open(debug_file_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        print(f"[DEBUG] Saved complete HTML response to {debug_file_path}")
+        print(f"[DEBUG] HTML search URL: {response.url}")
+        print(f"[DEBUG] HTTP status: {response.status_code}")
+        # Log a small snippet of HTML to see structure without flooding logs
+        print(f"[DEBUG] HTML snippet (first 500 chars): {html[:500]}")
+
+        # Count total <a> tags
+        total_a_tags = len(re.findall(r'<a[^>]*>', html, re.IGNORECASE))
+        print(f"[DEBUG] Total <a> tags found: {total_a_tags}")
+
+    # Updated regex to match DuckDuckGo's current result structure
+    # Looking for result links with various possible class names
+    # Order matters: put patterns that capture full href first
+    patterns = [
+        r'<a\s+[^>]*class="[^"]*result__url[^"]*"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>',
+        r'<a\s+[^>]*class="[^"]*result[^"]*"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>',
+        r'<a\s+[^>]*href="([^"]*uddg=[^"]*)"[^>]*>([^<]*)</a>',
+        r'<a\s+[^>]*href="/uddg\?uddg=([^"]*)"[^>]*class="[^"]*result[^"]*"[^>]*>([^<]*)</a>'
+    ]
+
+    matches = []
+    pattern_used = None
+    for pattern in patterns:
+        matches = re.findall(pattern, html, re.IGNORECASE | re.DOTALL)
+        if matches:
+            pattern_used = pattern
+            if DEBUG:
+                print(f"[DEBUG] Found matches using pattern: {pattern}")
+            break
+
+    if DEBUG:
+        print(f"[DEBUG] Number of raw candidate links (before URL extraction): {len(matches)}")
 
     results = []
-    for href, title in matches:
+    seen_urls = set()
+    accepted_count = 0
+    rejected_count = 0
+
+    for href, link_text in matches:
+        print("\n====================================================")
+        print(f"[STEP 1] href = {href}")
+
         # Extract the actual URL from the duckduckgo redirect URL
-        parsed = urlparse(href)
-        query_params = parse_qs(parsed.query)
-        if 'uddg' not in query_params:
-            continue
-        actual_url = unquote(query_params['uddg'][0])
+        try:
+            if href.startswith("/uddg?"):
+                parsed = urlparse("https://duckduckgo.com" + href)
+            else:
+                parsed = urlparse(href)
 
-        # Normalize the URL
+            query_params = parse_qs(parsed.query)
+
+            if "uddg" not in query_params:
+                print("[REJECT] No uddg parameter")
+                rejected_count += 1
+                continue
+
+            actual_url = unquote(query_params["uddg"][0])
+
+            print(f"[STEP 2] actual_url = {actual_url}")
+
+        except Exception as e:
+            print(f"[REJECT] URL extraction failed: {e}")
+            rejected_count += 1
+            continue
+
+        # Normalize URL
         normalized = _normalize_url(actual_url)
-        if not normalized or _is_blocked_domain(normalized):
+
+        print(f"[STEP 3] normalized = {normalized}")
+
+        if not normalized:
+            print("[REJECT] normalize returned empty string")
+            rejected_count += 1
             continue
 
-        # Use the title as the company name (strip whitespace)
-        company_name = title.strip() if title else None
+        # Blocked domain?
+        blocked = _is_blocked_domain(normalized)
 
-        # We don't extract a snippet from the HTML for simplicity
-        # (could be added later if needed)
+        print(f"[STEP 4] blocked = {blocked}")
+
+        if blocked:
+            print("[REJECT] Blocked domain")
+            rejected_count += 1
+            continue
+
+        # Duplicate?
+        duplicate = normalized in seen_urls
+
+        print(f"[STEP 5] duplicate = {duplicate}")
+
+        if duplicate:
+            print("[REJECT] Duplicate")
+            rejected_count += 1
+            continue
+
+        seen_urls.add(normalized)
+
+        company_name = link_text.strip() if link_text else None
+
         results.append({
-            'url': normalized,
-            'title': company_name,
-            'description': None,
+            "url": normalized,
+            "title": company_name,
+            "description": None,
         })
+
+        print(f"[STEP 6] ACCEPTED -> {normalized}")
+
+        accepted_count += 1
+
+        if len(results) >= 50:
+            break
+
+    if DEBUG:
+        print(f"[DEBUG] Number of results after filtering: {len(results)}")
+        print(f"[DEBUG] Accepted links: {accepted_count}")
+        print(f"[DEBUG] Rejected links: {rejected_count}")
 
     return results
 
@@ -261,7 +368,7 @@ def _duckduckgo_html_search(query: str) -> List[Dict[str, Any]]:
 def discover_free_leads(
     industry: str,
     location: str,
-    max_results: int = DEFAULT_MAX_RESULTS,
+    max_results: int = 10,
 ) -> List[Dict[str, Any]]:
     """Discover businesses using DuckDuckGo HTML search with fallback to Instant Answer.
 
@@ -291,8 +398,17 @@ def discover_free_leads(
     # Input validation – raises ``ValueError`` on bad user data.
     _validate_inputs(industry, location, max_results)
 
+    # Check if debug mode is enabled via environment variable
+    DEBUG = os.environ.get('DEBUG_FREE_LEAD', '').lower() in ('1', 'true', 'yes')
+
+    if DEBUG:
+        print(f"[DEBUG] Starting free lead discovery for industry='{industry}', location='{location}', max_results={max_results}")
+
     # Always perform HTML search with the primary query format
     query = f"{industry} company {location}"
+    if DEBUG:
+        print(f"[DEBUG] Using HTML search query: {query}")
+
     html_results = _duckduckgo_html_search(query)
 
     # Process HTML search results
@@ -316,8 +432,17 @@ def discover_free_leads(
             "location": location,
         })
 
+        if DEBUG:
+            print(f"[DEBUG] Added to final results: {res['title']} -> {url}")
+
+    if DEBUG:
+        print(f"[DEBUG] HTML search produced {len(html_results_processed)} results after deduplication")
+
     # Always perform API fallback search
     query = _build_query(industry, location)
+    if DEBUG:
+        print(f"[DEBUG] Using Instant Answer API query: {query}")
+
     params = {
         "q": query,
         "format": "json",
@@ -325,12 +450,26 @@ def discover_free_leads(
         "skip_disambig": 1,
     }
 
-    response = requests.get(API_ENDPOINT, params=params, timeout=10)
-    response.raise_for_status()
+    try:
+        response = requests.get("https://api.duckduckgo.com/", params=params, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        if DEBUG:
+            print(f"[DEBUG] API fallback request failed: {e}")
+        # If API also fails, return what we got from HTML (might be empty)
+        if html_results_processed:
+            return html_results_processed
+        return []
+
+    if DEBUG:
+        print(f"[DEBUG] Instant Answer API HTTP status: {response.status_code}")
 
     data = response.json()
     # Extract possible results from RelatedTopics
     topics = _extract_related_topics(data)
+
+    if DEBUG:
+        print(f"[DEBUG] Instant Answer API returned {len(topics)} raw topics")
 
     # Process API results
     api_results_processed = []
@@ -344,12 +483,18 @@ def discover_free_leads(
         text = topic.get("Text") or ""  # Define text variable here
 
         if not url:
+            if DEBUG:
+                print(f"[DEBUG] Skipping topic with no URL: {topic}")
             continue
 
         normalized = _normalize_url(url)
         if not normalized or _is_blocked_domain(normalized):
+            if DEBUG:
+                print(f"[DEBUG] Skipping blocked/invalid URL: {normalized}")
             continue
         if normalized in seen_urls:  # Fixed: check if this specific URL was seen before
+            if DEBUG:
+                print(f"[DEBUG] Skipping duplicate URL: {normalized}")
             continue
 
         seen_urls.add(normalized)
@@ -380,11 +525,21 @@ def discover_free_leads(
             "location": location,
         })
 
+        if DEBUG:
+            print(f"[DEBUG] Added API result: {company_name} -> {normalized}")
+
         if len(api_results_processed) >= max_results:
             break
 
+    if DEBUG:
+        print(f"[DEBUG] API fallback produced {len(api_results_processed)} results after deduplication")
+
     # Return HTML results if we got any, otherwise fall back to API results
     if html_results_processed:
+        if DEBUG:
+            print(f"[DEBUG] Returning HTML search results")
         return html_results_processed
     else:
+        if DEBUG:
+            print(f"[DEBUG] Returning API fallback results")
         return api_results_processed
