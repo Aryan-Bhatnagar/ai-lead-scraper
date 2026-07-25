@@ -12,6 +12,8 @@ export default function Discover() {
   const [maxResults, setMaxResults] = useState(10)
   const [method, setMethod] = useState('standard')
   const [loading, setLoading] = useState(false)
+const [enrichLoading, setEnrichLoading] = useState({})
+const [expanded, setExpanded] = useState({})
   const [results, setResults] = useState([])
   const [error, setError] = useState('')
 
