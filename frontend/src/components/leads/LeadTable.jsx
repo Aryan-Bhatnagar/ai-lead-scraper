@@ -1,4 +1,7 @@
 import { Eye, Trash2 } from 'lucide-react'
+import OpportunityScoreBadge from '../intelligence/OpportunityScoreBadge'
+import { calculateOpportunityScore } from '../../services/opportunityIntelligence'
+
 
 export default function LeadTable({ leads, onView, onDelete }) {
   if (leads.length === 0) return null
@@ -11,6 +14,7 @@ export default function LeadTable({ leads, onView, onDelete }) {
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Company</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Website</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Industry</th>
+            <th className="px-4 py-3 text-sm font-semibold text-slate-600">Opp. Score</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Email</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Location</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Status</th>
@@ -35,6 +39,9 @@ export default function LeadTable({ leads, onView, onDelete }) {
               </td>
               <td className="px-4 py-3 text-sm text-slate-600">
                 {lead.industry || 'N/A'}
+              </td>
+              <td className="px-4 py-3 text-sm">
+                <OpportunityScoreBadge score={calculateOpportunityScore(lead)} />
               </td>
               <td className="px-4 py-3 text-sm text-slate-600">
                 {lead.email || 'N/A'}

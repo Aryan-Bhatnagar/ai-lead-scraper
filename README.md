@@ -1,6 +1,6 @@
-# AI Lead Scraper
-
-Local, free AI lead scraper built with [ScrapeGraphAI](https://github.com/ScrapeGraphAI/Scrapegraph-ai) and a local [Ollama](https://ollama.com/) model. No paid APIs, no API keys.
+# Bilvaleaf Business Development Platform
+ 
+Local, free prospect intelligence platform built with [ScrapeGraphAI](https://github.com/ScrapeGraphAI/Scrapegraph-ai) and a local [Ollama](https://ollama.com/) model. No paid APIs, no API keys.
 
 ## Stack
 

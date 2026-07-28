@@ -1,4 +1,6 @@
 import { Fragment } from 'react'
+import IntelligencePanel from '../intelligence/IntelligencePanel'
+
 
 export default function LeadDetailsModal({ lead, onClose }) {
   if (!lead) return null
@@ -18,7 +20,8 @@ export default function LeadDetailsModal({ lead, onClose }) {
           >
             ✕
           </button>
-          <h2 className="text-xl font-semibold mb-6 text-slate-800">Lead Details</h2>
+          <h2 className="text-xl font-semibold mb-6 text-slate-800">Prospect Details</h2>
+          <IntelligencePanel prospect={lead} />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3">
             {[
               { label: 'Company', value: lead.company_name },

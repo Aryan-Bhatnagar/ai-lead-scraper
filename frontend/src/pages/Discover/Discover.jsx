@@ -45,7 +45,7 @@ export default function Discover() {
 
   return (
     <div className="p-4 lg:p-8 space-y-8">
-      <PageHeader title="Discover Leads" subtitle="Find new business leads by industry and location." />
+      <PageHeader title="Prospect Intelligence" subtitle="Find new business prospects by industry and location." />
 
       <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm max-w-3xl mx-auto">
         <form onSubmit={e => { e.preventDefault(); handleDiscover(); }} className="space-y-4">
@@ -68,9 +68,9 @@ export default function Discover() {
             <div>
               <label className="block text-sm font-medium mb-1" htmlFor="method">Discovery Method</label>
               <select id="method" className="w-full border rounded p-2" value={method} onChange={e => setMethod(e.target.value)}>
-                <option value="standard">Standard Discovery</option>
-                <option value="free">Free Discovery</option>
-                <option value="google">Google Maps Discovery</option>
+                <option value="standard">Standard Intelligence</option>
+                <option value="free">Free Intelligence</option>
+                <option value="google">Google Maps Intelligence</option>
               </select>
             </div>
           </div>
@@ -85,13 +85,13 @@ export default function Discover() {
         {loading && (
           <div className="flex items-center gap-2 mt-4">
             <LoadingSpinner className="h-5 w-5" />
-            <span>Discovering leads…</span>
+            <span>Identifying prospects…</span>
           </div>
         )}
 
         {error && <div className="mt-4 text-red-600">{error}</div>}
 
-        {!loading && !error && results.length === 0 && <EmptyState icon={Search} title="No leads discovered yet." />}
+        {!loading && !error && results.length === 0 && <EmptyState icon={Search} title="No prospects identified yet." />}
 
         {results.length > 0 && (
           <table className="mt-6 w-full border-collapse">

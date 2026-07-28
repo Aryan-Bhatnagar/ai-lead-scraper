@@ -1,5 +1,5 @@
 """
-Flask application factory for AI Lead Scraper.
+Flask application factory for Bilvaleaf Business Development Platform.
 
 This module implements a fully‑fledged Flask app that
 * reads configuration from a supplied dictionary,
@@ -100,7 +100,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     Flask
         A fully initialised Flask application.
     """
-    app = Flask("ai_lead_scraper")
+    app = Flask("bilvaleaf_bdp")
     CORS(app)  # Enable CORS for development.
 
     # Apply configuration – ``getattr`` is used so the caller can pass a
@@ -474,8 +474,8 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results,
             )
         except Exception:
-            app.logger.exception("Lead discovery failed")
-            return jsonify({"error": "Lead discovery failed"}), 500
+            app.logger.exception("Prospect intelligence failed")
+            return jsonify({"error": "Prospect intelligence failed"}), 500
         # Extract URLs, validate them and deduplicate preserving order
         urls: list[str] = []
         seen: set[str] = set()
@@ -589,9 +589,9 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results,
             )
         except Exception:
-            app.logger.exception("Lead discovery failed")
+            app.logger.exception("Prospect intelligence failed")
             return jsonify({
-                "error": "Lead discovery failed"
+                "error": "Prospect intelligence failed"
             }), 500
 
         # Step 7: Return candidate websites
@@ -709,7 +709,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results,
             )
         except Exception as exc:
-            app.logger.exception("Free lead discovery failed")
+            app.logger.exception("Free prospect intelligence failed")
             return jsonify({"error": str(exc)}), 500
         # Step 7: Return normalized results
         return jsonify({
@@ -860,7 +860,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results,
             )
         except Exception as exc:
-            app.logger.exception("Free lead discovery failed")
+            app.logger.exception("Free prospect intelligence failed")
             return jsonify({"error": str(exc)}), 500
         # Step 7: Run enrichment on discovered leads
         try:

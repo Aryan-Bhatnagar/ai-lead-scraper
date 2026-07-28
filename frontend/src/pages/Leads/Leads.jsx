@@ -113,16 +113,16 @@ export default function Leads() {
   return (
     <div>
       <PageHeader
-        title="Leads Database"
-        subtitle="Manage and view all collected leads."
+        title="Prospect Database"
+        subtitle="Manage and view all collected prospects."
       />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <LeadSummaryCard title="Total Leads" value={stats.total} type="total" />
-        <LeadSummaryCard title="Enriched Leads" value={stats.enriched} type="enriched" />
-        <LeadSummaryCard title="Leads with Email" value={stats.email} type="email" />
-        <LeadSummaryCard title="Leads with Website" value={stats.website} type="website" />
+        <LeadSummaryCard title="Total Prospects" value={stats.total} type="total" />
+        <LeadSummaryCard title="Enriched Prospects" value={stats.enriched} type="enriched" />
+        <LeadSummaryCard title="Prospects with Email" value={stats.email} type="email" />
+        <LeadSummaryCard title="Prospects with Website" value={stats.website} type="website" />
       </div>
 
       {/* Controls */}
@@ -132,7 +132,7 @@ export default function Leads() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
-              placeholder="Search leads..."
+              placeholder="Search prospects..."
               className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -181,13 +181,13 @@ export default function Leads() {
       {/* Main Content */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20">
-          <LoadingSpinner size="lg" text="Loading leads..." />
+          <LoadingSpinner size="lg" text="Loading prospects..." />
         </div>
       ) : filteredLeads.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-12">
           <EmptyState
             icon={Database}
-            title="No Leads Found"
+            title="No Prospects Found"
             description="Try adjusting your search or filters to find what you're looking for."
           />
         </div>

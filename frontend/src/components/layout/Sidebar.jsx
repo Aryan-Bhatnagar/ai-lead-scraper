@@ -16,11 +16,11 @@ import { useState } from 'react'
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/discover', label: 'Discover Leads', icon: Search },
-  { to: '/enrichment', label: 'Lead Enrichment', icon: Sparkles },
-  { to: '/email-extraction', label: 'Email Extraction', icon: Mail },
-  { to: '/leads', label: 'Leads Database', icon: Database },
-  { to: '/outreach', label: 'Outreach Queue', icon: Send },
+  { to: '/discover', label: 'Prospect Intelligence', icon: Search },
+  { to: '/enrichment', label: 'Prospect Enrichment', icon: Sparkles },
+  { to: '/email-extraction', label: 'Contact Discovery', icon: Mail },
+  { to: '/leads', label: 'Prospect Database', icon: Database },
+  { to: '/outreach', label: 'Engagement Queue', icon: Send },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
@@ -41,7 +41,7 @@ export default function Sidebar() {
         </div>
         {!collapsed && (
           <span className="font-semibold text-white text-sm tracking-wide truncate">
-            AI Lead Scraper
+            Bilvaleaf Business Development Platform
           </span>
         )}
       </div>

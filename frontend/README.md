@@ -1,6 +1,6 @@
-# AI Lead Scraper — Frontend Dashboard
+# Bilvaleaf Business Development Platform — Frontend Dashboard
 
-Modern React dashboard for managing the AI Lead Scraper pipeline.
+Modern React dashboard for managing the Bilvaleaf business development pipeline.
 
 ## Tech Stack
 

@@ -6,15 +6,15 @@ export default function Enrichment() {
   return (
     <div>
       <PageHeader
-        title="Lead Enrichment"
-        subtitle="Enhance lead data with additional information from web scraping."
+        title="Prospect Enrichment"
+        subtitle="Enhance prospect data with additional information from web intelligence."
       />
 
       <div className="bg-white rounded-xl border border-slate-200 p-8">
         <EmptyState
           icon={Sparkles}
-          title="Lead Enrichment"
-          description="Select leads and enrich their data with company details, contact information, and more using intelligent web scraping."
+          title="Prospect Enrichment"
+          description="Select prospects and enrich their data with company details, contact information, and more using intelligent web intelligence."
         >
           <p className="text-xs text-slate-400">
             API integration coming in Phase 13B
