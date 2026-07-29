@@ -11,6 +11,7 @@ transactions via context managers.
 """
 
 import sqlite3
+import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -146,7 +147,25 @@ CREATE TABLE IF NOT EXISTS outreach_queue (
     CHECK (outreach_status IN ('PENDING','PROCESSING','SENT','FAILED','COMPLETED'))
 );
 
+CREATE TABLE IF NOT EXISTS ai_insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL,
+    company_summary TEXT,
+    services_offered TEXT,
+    target_customers TEXT,
+    business_model TEXT,
+    industry_category TEXT,
+    technologies_used TEXT,
+    pain_points TEXT,
+    sales_opportunities TEXT,
+    generated_at TEXT,
+    llm_provider TEXT,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ai_insights_lead_id ON ai_insights(lead_id);
+
 -- Prevent duplicate active entries per lead/channel
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_outreach_active
 ON outreach_queue (lead_id, outreach_channel)
 WHERE outreach_status IN ('PENDING','PROCESSING','SENT');
@@ -534,8 +553,75 @@ def get_lead_by_id(lead_id: int, db_path: Path | str = DB_PATH) -> dict | None:
 def get_all_leads(db_path: Path | str = DB_PATH) -> list[dict]:
     with get_connection(db_path) as conn:
         rows = conn.execute("SELECT * FROM leads ORDER BY id").fetchall()
-        return [dict(r) for r in rows]
+        return [dict(dict(r)) for r in rows]
 
+def get_ai_insights_by_lead_id(lead_id: int, db_path: Path | str = DB_PATH) -> dict | None:
+    """Return AI insights for a specific lead, or None if not found."""
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM ai_insights WHERE lead_id = ?", (lead_id,)
+        ).fetchone()
+        if not row:
+            return None
+
+        result = dict(row)
+        # JSON columns that should be deserialized
+        json_cols = [
+            "services_offered", "target_customers", "technologies_used",
+            "pain_points", "sales_opportunities"
+        ]
+        for col in json_cols:
+            val = result.get(col)
+            if isinstance(val, str) and (val.startswith('[') or val.startswith('{')):
+                try:
+                    result[col] = json.loads(val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return result
+
+def upsert_ai_insights(lead_id: int, insights: dict, provider: str, db_path: Path | str = DB_PATH) -> int:
+    """Insert or update AI insights for a lead. Returns the insight row id."""
+    now = utc_now()
+    # We expect insights to be a dict matching the table columns
+    columns = [
+        "company_summary", "services_offered", "target_customers",
+        "business_model", "industry_category", "technologies_used",
+        "pain_points", "sales_opportunities"
+    ]
+
+    # Ensure all columns are present and convert lists/dicts to JSON
+    values = {}
+    for col in columns:
+        val = insights.get(col, "")
+        if isinstance(val, (list, dict)):
+            values[col] = json.dumps(val)
+        else:
+            values[col] = val
+
+    with get_connection(db_path) as conn:
+        # Check if exists
+        existing = conn.execute(
+            "SELECT id FROM ai_insights WHERE lead_id = ?", (lead_id,)
+        ).fetchone()
+
+        if existing:
+            # Update existing
+            set_clause = ", ".join([f"{c} = :{c}" for c in columns])
+            set_clause += ", generated_at = :generated_at, llm_provider = :llm_provider"
+            conn.execute(
+                f"UPDATE ai_insights SET {set_clause} WHERE lead_id = :lead_id",
+                {**values, "generated_at": now, "llm_provider": provider, "lead_id": lead_id}
+            )
+            return existing["id"]
+        else:
+            # Insert new
+            cols = ["lead_id"] + columns + ["generated_at", "llm_provider"]
+            placeholders = ", ".join([":" + c for c in cols])
+            cur = conn.execute(
+                f"INSERT INTO ai_insights ({', '.join(cols)}) VALUES ({placeholders})",
+                {**values, "lead_id": lead_id, "generated_at": now, "llm_provider": provider}
+            )
+            return cur.lastrowid
 
 def delete_lead(lead_id: int, db_path: Path | str = DB_PATH) -> bool:
     """Delete a lead; returns ``True`` if a row was removed."""

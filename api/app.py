@@ -522,7 +522,41 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         return jsonify({"items": items, "count": len(items)})
 
     # -------------------------------------------------------------------
-    # Lead discovery endpoint (unchanged from Phase 8C)
+    # Intelligence endpoints (Phase 15A)
+    # -------------------------------------------------------------------
+    @app.route("/api/intelligence/<int:lead_id>", methods=["GET"])
+    def get_intelligence(lead_id: int):
+        insights = db.get_ai_insights_by_lead_id(lead_id, app.config["DATABASE"])
+        if not insights:
+            return jsonify({"lead_id": lead_id, "insights": None}), 200
+        return jsonify({"lead_id": lead_id, "insights": dict(insights)}), 200
+
+    @app.route("/api/intelligence/generate/<int:lead_id>", methods=["POST"])
+    def generate_intelligence(lead_id: int):
+        from api.services.ai_intelligence import intelligence_manager
+        lead = db.get_lead_by_id(lead_id, app.config["DATABASE"])
+        if not lead:
+            abort(404, description="Lead not found")
+
+        website = lead.get("website")
+        if not website:
+            abort(400, description="Lead has no website to analyze")
+
+        company_name = lead.get("company_name", "the company")
+        company_description = lead.get("company_description", "")
+
+        try:
+            insights = intelligence_manager.get_or_generate_intelligence(
+                lead_id=lead_id,
+                website=website,
+                company_name=company_name,
+                context=company_description
+            )
+            return jsonify({"status": "success", "insights": insights}), 200
+        except Exception as e:
+            app.logger.exception("AI Intelligence generation failed")
+            abort(500, description=f"AI Generation failed: {str(e)}")
+
     # -------------------------------------------------------------------
     @app.route("/api/discover", methods=["POST"])
     def discover():
