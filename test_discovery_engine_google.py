@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+from datetime import datetime, UTC
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -31,7 +31,7 @@ def test_engine_google_flow():
             "snippet": "Snippet A",
             "source_engine": "ddgs",
             "query": "DevOps USA",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         },
         {
             "title": "Lead B",
@@ -39,7 +39,7 @@ def test_engine_google_flow():
             "snippet": "Snippet B",
             "source_engine": "ddgs",
             "query": "DevOps USA",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     ]
 

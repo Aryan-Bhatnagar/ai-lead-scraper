@@ -16,7 +16,6 @@ from .query import DiscoveryQuery, DiscoveryBatch
 from .registry import ProviderRegistry, default_registry
 from .normalizers.registry import default_registry as normalizer_registry
 
-
 # ---------------------------------------------------------------------------
 # Summary value objects
 # ---------------------------------------------------------------------------
@@ -189,15 +188,25 @@ class LeadDiscoveryEngine:
                         except Exception as web_exc:
                             print(f"Website enrichment phase failed: {web_exc}")
 
-
                 if batch.meta:
                     src_summary.next_cursor = batch.next_cursor
 
                 summary.per_source[source_name] = src_summary
-
-                # Accumulate totals on the run-level summary
+                # Accumulate totals on the run-level summary (raw counts)
                 summary.total_found += src_summary.found
                 summary.total_new += 0  # placeholder for future dedupe
                 summary.leads.extend([])  # placeholder for future dedupe
+
+        # ------------------------------------------------------------------
+        # 5. Deduplication (new stage – Phase 18B)
+        # ------------------------------------------------------------------
+        from scraper.deduplication.deduper import LeadDeduper
+        deduper = LeadDeduper()
+        deduped_leads = deduper.deduplicate(summary.leads)
+        # Replace the leads list with the deduplicated version and update counts
+        summary.leads = deduped_leads
+        summary.total_new = len(deduped_leads)
+        # ``total_found`` already reflects the raw number of candidates; we keep
+        # it unchanged because it represents discovery volume before dedup.
 
         return summary

@@ -474,8 +474,8 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results,
             )
         except Exception:
-            app.logger.exception("Prospect intelligence failed")
-            return jsonify({"error": "Prospect intelligence failed"}), 500
+            app.logger.exception("Lead discovery failed")
+            return jsonify({"error": "Lead discovery failed"}), 500
         # Extract URLs, validate them and deduplicate preserving order
         urls: list[str] = []
         seen: set[str] = set()
@@ -653,9 +653,9 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results,
             )
         except Exception:
-            app.logger.exception("Prospect intelligence failed")
+            app.logger.exception("Lead discovery failed")
             return jsonify({
-                "error": "Prospect intelligence failed"
+                "error": "Lead discovery failed"
             }), 500
 
         # Step 7: Return candidate websites

@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+from datetime import datetime, UTC
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -28,7 +28,7 @@ def test_search_service_integration():
         "snippet": "Test snippet description",
         "source_engine": "ddgs",
         "query": "DevOps company USA",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }
     
     with patch("scraper.discovery.providers.google_search_provider.SearchService.search") as mock_search:

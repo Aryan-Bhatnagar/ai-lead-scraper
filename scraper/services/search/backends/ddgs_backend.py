@@ -1,11 +1,11 @@
 """
 DuckDuckGo Search Backend.
 
-Implements the SearchBackend interface using the duckduckgo_search (DDGS) library.
+Implements the SearchBackend interface using the DDGS search library.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import List, Dict, Any
 
 from ..interface import SearchBackend
@@ -18,10 +18,10 @@ class DDGSBackend(SearchBackend):
 
     def __init__(self):
         try:
-            from duckduckgo_search import DDGS
+            from ddgs import DDGS
             self.ddgs = DDGS()
         except ImportError:
-            print("Error: duckduckgo_search package not installed. Please run 'pip install duckduckgo_search'.")
+            print("Error: ddgs package not installed. Please run 'pip install ddgs'.")
             self.ddgs = None
 
     @property
@@ -49,7 +49,7 @@ class DDGSBackend(SearchBackend):
                     snippet=res.get("body", ""),
                     source_engine=self.name,
                     query=query,
-                    timestamp=datetime.utcnow().isoformat()
+                    timestamp=datetime.now(UTC).isoformat()
                 )
                 canonical_results.append(result.to_dict())
 

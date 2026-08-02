@@ -6,7 +6,7 @@ into the canonical UnifiedLead format.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from .base import BaseNormalizer
@@ -45,7 +45,7 @@ class WebsiteNormalizer(BaseNormalizer):
         provenance = Provenance(
             source=candidate.source,
             source_url=website,
-            discovered_at=datetime.utcnow(), # Or from a timestamp if available in payload
+            discovered_at=datetime.now(UTC), # Or from a timestamp if available in payload
             discovery_query={"industry": query.industry, "location": query.location},
             raw_ref="website_deep_scrape"
         )

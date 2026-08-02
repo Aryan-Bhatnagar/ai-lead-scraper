@@ -5,7 +5,7 @@ Discovers potential leads by performing search queries via the SearchService.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List
 
 from ..provider import DiscoveryProvider, CapabilitySet
@@ -75,7 +75,7 @@ class GoogleSearchDiscoveryProvider(DiscoveryProvider):
                         RawCandidate(
                             payload=res, # Contains title, snippet, url, source_engine, query, timestamp
                             source=self.name,
-                            fetched_at=datetime.utcnow()
+                            fetched_at=datetime.now(UTC)
                         )
                     )
                     total_results_collected += 1

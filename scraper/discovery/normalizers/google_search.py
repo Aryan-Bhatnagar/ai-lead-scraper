@@ -6,7 +6,7 @@ into the canonical UnifiedLead format.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from .base import BaseNormalizer
@@ -31,7 +31,7 @@ class GoogleSearchNormalizer(BaseNormalizer):
         snippet = payload.get("snippet", "").strip()
         source_engine = payload.get("source_engine", "unknown")
         search_query = payload.get("query", "")
-        timestamp = payload.get("timestamp") or datetime.utcnow().isoformat()
+        timestamp = payload.get("timestamp") or datetime.now(UTC).isoformat()
 
         # Basic Location Extraction from snippet/title (Optional heuristic)
         # In a real scenario, we might use an LLM or NER here.

@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from datetime import datetime
+from datetime import datetime, UTC
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -34,7 +34,7 @@ def test_full_discovery_pipeline():
             "snippet": "Leading AI agency in New York",
             "source_engine": "ddgs",
             "query": "AI agency NYC",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     ]
     
@@ -97,7 +97,7 @@ def test_missing_website_handling():
             "snippet": "No site here",
             "source_engine": "ddgs",
             "query": "ghost company",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     ]
 

@@ -5,7 +5,8 @@ Implements the DiscoveryProvider interface to find leads from Upwork job posting
 """
 
 from __future__ import annotations
-from datetime import datetime
+
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from ..provider import DiscoveryProvider, CapabilitySet
@@ -71,7 +72,7 @@ class UpworkDiscoveryProvider(DiscoveryProvider):
                     RawCandidate(
                         payload=job, # Dictionary containing project_title, budget, etc.
                         source=self.name,
-                        fetched_at=datetime.utcnow()
+                        fetched_at=datetime.now(timezone.utc)
                     )
                 )
         except Exception as e:

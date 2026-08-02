@@ -3,7 +3,7 @@ Canonical search result schema.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 @dataclass
@@ -16,7 +16,7 @@ class SearchResult:
     snippet: str
     source_engine: str
     query: str
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     location: Optional[str] = None
 
     def to_dict(self) -> dict:
