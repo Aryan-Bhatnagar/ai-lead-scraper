@@ -524,8 +524,34 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     # -------------------------------------------------------------------
     # Intelligence endpoints (Phase 15A)
     # -------------------------------------------------------------------
+    @app.route("/api/enrich/<int:lead_id>", methods=["POST"])
+    def enrich_lead(lead_id: int):
+        from api.services.enrichment.engine import uee_engine
+        lead = db.get_lead_by_id(lead_id, app.config["DATABASE"])
+        if not lead:
+            abort(404, description="Lead not found")
+
+        website = lead.get("website")
+        company_name = lead.get("company_name", "the company")
+
+        try:
+            profile = uee_engine.enrich_lead(lead_id, website or "", company_name)
+            return jsonify({"status": "success", "profile": profile}), 200
+        except Exception as e:
+            app.logger.exception("Lead enrichment failed")
+            abort(500, description=f"Enrichment failed: {str(e)}")
+
+    @app.route("/api/enrich/profile/<int:lead_id>", methods=["GET"])
+    def get_enrichment_profile(lead_id: int):
+        from api.services.enrichment.engine import uee_engine
+        profile = uee_engine.get_profile(lead_id)
+        if not profile:
+            return jsonify({"lead_id": lead_id, "profile": None}), 200
+        return jsonify({"lead_id": lead_id, "profile": profile}), 200
+
     @app.route("/api/intelligence/<int:lead_id>", methods=["GET"])
     def get_intelligence(lead_id: int):
+
         insights = db.get_ai_insights_by_lead_id(lead_id, app.config["DATABASE"])
         if not insights:
             return jsonify({"lead_id": lead_id, "insights": None}), 200
@@ -534,22 +560,26 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     @app.route("/api/intelligence/generate/<int:lead_id>", methods=["POST"])
     def generate_intelligence(lead_id: int):
         from api.services.ai_intelligence import intelligence_manager
+        from api.services.enrichment.engine import uee_engine
+
         lead = db.get_lead_by_id(lead_id, app.config["DATABASE"])
         if not lead:
             abort(404, description="Lead not found")
 
-        website = lead.get("website")
-        if not website:
-            abort(400, description="Lead has no website to analyze")
+        # Ensure we have a business profile first
+        profile = uee_engine.get_profile(lead_id)
+        if not profile:
+            # Trigger on-the-fly enrichment if profile is missing
+            website = lead.get("website", "")
+            company_name = lead.get("company_name", "the company")
+            profile = uee_engine.enrich_lead(lead_id, website, company_name)
 
-        company_name = lead.get("company_name", "the company")
         company_description = lead.get("company_description", "")
 
         try:
             insights = intelligence_manager.get_or_generate_intelligence(
                 lead_id=lead_id,
-                website=website,
-                company_name=company_name,
+                business_profile=profile,
                 context=company_description
             )
             return jsonify({"status": "success", "insights": insights}), 200

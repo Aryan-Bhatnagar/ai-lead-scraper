@@ -162,9 +162,24 @@ CREATE TABLE IF NOT EXISTS ai_insights (
     llm_provider TEXT,
     FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_ai_insights_lead_id ON ai_insights(lead_id);
+CREATE TABLE IF NOT EXISTS business_profiles (
+    lead_id INTEGER PRIMARY KEY,
+    profile_json TEXT,
+    updated_at TEXT,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+);
 
--- Prevent duplicate active entries per lead/channel
+CREATE TABLE IF NOT EXISTS enrichment_raw_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL,
+    provider_name TEXT NOT NULL,
+    raw_payload TEXT,
+    created_at TEXT,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrichment_lead_id ON enrichment_raw_data(lead_id);
+
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_outreach_active
 ON outreach_queue (lead_id, outreach_channel)
@@ -240,6 +255,7 @@ def initialize_database(db_path: Path | str = DB_PATH) -> None:
             conn.execute(
                 "ALTER TABLE leads ADD COLUMN lead_status TEXT NOT NULL DEFAULT 'NEW'"
             )
+
 
 # ---------------------------------------------------------------------------
 # Leads

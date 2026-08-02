@@ -22,7 +22,8 @@ class BaseAIProvider(ABC):
     }
 
     @abstractmethod
-    def generate_intelligence(self, url: str, company_name: str, context: str) -> Dict[str, Any]:
+    def generate_intelligence(self, business_profile: Dict[str, Any], context: str) -> Dict[str, Any]:
+        """Generate intelligence using the synthesized Business Profile instead of a raw URL."""
         pass
 
     def _ensure_schema(self, result: Any) -> Dict[str, Any]:
@@ -95,21 +96,17 @@ class OllamaProvider(BaseAIProvider):
             format="json"
         )
 
-    def generate_intelligence(self, url: str, company_name: str, context: str) -> Dict[str, Any]:
-        # Step 1: Use ScrapeGraphAI only to extract website content
-        extraction_prompt = (
-            f"Extract all relevant business information from the website of {company_name}. "
-            "Focus on what they do, who they serve, their products, services, and any visible tech stack."
-        )
+    def generate_intelligence(self, business_profile: Dict[str, Any], context: str) -> Dict[str, Any]:
+        # Extract the core business details from the profile for the prompt
+        company_name = business_profile.get("company_name", "the company")
+        details = business_profile.get("business_details", {})
+        description = details.get("description", "No description available")
 
-        smart_scraper = SmartScraperGraph(prompt=extraction_prompt, source=url, config=self.graph_config)
-        extracted_content = smart_scraper.run()
-
-        # Step 2 & 3: Pass extracted content to the LLM with a dedicated Business Intelligence prompt
+        # Step 2 & 3: Pass the Business Profile content to the LLM with a dedicated Business Intelligence prompt
         bi_prompt = (
-            f"You are a Senior Business Analyst. Based on the following extracted website content for {company_name}, "
+            f"You are a Senior Business Analyst. Based on the following Business Profile for {company_name}, "
             f"and this existing context: {context}, generate high-level business intelligence. "
-            f"\n\nExtracted Content:\n{json.dumps(extracted_content)}\n\n"
+            f"\n\nBusiness Profile:\n{json.dumps(business_profile, indent=2)}\n\n"
             "You MUST return a valid JSON object with exactly these keys:\n"
             "- company_summary: (2-sentence high-level pitch)\n"
             "- services_offered: (list of core products/services)\n"
@@ -124,13 +121,28 @@ class OllamaProvider(BaseAIProvider):
 
         try:
             # Use the LangChain ChatOllama client
+            import socket
+            print("OLLAMA_BASE_URL =", os.getenv("OLLAMA_BASE_URL"))
+            print("SCRAPEGRAPH_MODEL =", os.getenv("SCRAPEGRAPH_MODEL"))
+            print("LLM OBJECT =", self.llm)
+            print("LLM BASE URL =", getattr(self.llm, "base_url", "N/A"))
+            print("LLM MODEL =", getattr(self.llm, "model", "N/A"))
+            print(socket.getaddrinfo("localhost", 11434))
             response = self.llm.invoke(bi_prompt)
             # ChatOllama returns a BaseMessage; the content is in .content
             result = response.content
         except Exception as e:
+            import traceback
+            print("\n--- DEBUG: AI Intelligence Connection Failure ---")
+            traceback.print_exc()
+            print(f"TYPE: {type(e)}")
+            print(f"REPR: {repr(e)}")
+            print(f"CAUSE: {repr(e.__cause__)}")
+            print(f"CONTEXT: {repr(e.__context__)}")
+            print("--- END DEBUG ---\n")
             print(f"Error during BI analysis phase: {e}")
-            # Fallback: if LLM call fails, try to use the extracted content as is
-            result = extracted_content
+            # Fallback: if LLM call fails, use the description as is
+            result = {"company_summary": description}
 
         return self._ensure_schema(result)
 
@@ -147,21 +159,17 @@ class OpenAIProvider(BaseAIProvider):
             "headless": True,
         }
 
-    def generate_intelligence(self, url: str, company_name: str, context: str) -> Dict[str, Any]:
-        # Step 1: Use ScrapeGraphAI only to extract website content
-        extraction_prompt = (
-            f"Extract all relevant business information from the website of {company_name}. "
-            "Focus on what they do, who they serve, their products, services, and any visible tech stack."
-        )
-        smart_scraper = SmartScraperGraph(prompt=extraction_prompt, source=url, config=self.graph_config)
-        extracted_content = smart_scraper.run()
+    def generate_intelligence(self, business_profile: Dict[str, Any], context: str) -> Dict[str, Any]:
+        # Extract the core business details from the profile for the prompt
+        company_name = business_profile.get("company_name", "the company")
+        details = business_profile.get("business_details", {})
+        description = details.get("description", "No description available")
 
         # Step 2 & 3: Dedicated BI analysis using the same LLM provider via ScrapeGraphAI
-        # (since OpenAI doesn't have a local API endpoint like Ollama, we reuse the Graph)
         bi_prompt = (
-            f"You are a Senior Business Analyst. Based on the following extracted website content for {company_name}, "
+            f"You are a Senior Business Analyst. Based on the following Business Profile for {company_name}, "
             f"and this existing context: {context}, generate high-level business intelligence. "
-            f"\n\nExtracted Content:\n{json.dumps(extracted_content)}\n\n"
+            f"\n\nBusiness Profile:\n{json.dumps(business_profile, indent=2)}\n\n"
             "You MUST return a valid JSON object with exactly these keys:\n"
             "- company_summary: (2-sentence high-level pitch)\n"
             "- services_offered: (list of core products/services)\n"
@@ -174,11 +182,8 @@ class OpenAIProvider(BaseAIProvider):
             "\nEnsure the response is only the JSON object."
         )
 
-        # Use the smart scraper again to process the extracted content
-        # In a real-world scenario we'd use the OpenAI SDK directly, but for consistency
-        # with the provider's config, we use the Graph with the content as source if possible
-        # or simply perform another run.
-        bi_scraper = SmartScraperGraph(prompt=bi_prompt, source=url, config=self.graph_config)
+        # Use the smart scraper again to process the synthesized profile
+        bi_scraper = SmartScraperGraph(prompt=bi_prompt, source=business_profile.get("website", ""), config=self.graph_config)
         result = bi_scraper.run()
 
         return self._ensure_schema(result)
@@ -196,17 +201,51 @@ class IntelligenceManager:
         else:
             raise ValueError(f"Unsupported AI provider: {provider_type}")
 
-    def get_or_generate_intelligence(self, lead_id: int, website: str, company_name: str, context: str) -> Dict[str, Any]:
+    @staticmethod
+    def _is_cache_valid(cached: Dict[str, Any]) -> bool:
+        """Return True only if the cached insights contain meaningful data.
+
+        A cache entry is considered INVALID when any of the core fields are
+        NULL/empty, which indicates a previous generation failed (e.g. LLM
+        connection error fell back to an empty schema and got persisted).
+        """
+        if not cached:
+            return False
+
+        def _has_text(value: Any) -> bool:
+            return isinstance(value, str) and value.strip() != ""
+
+        def _has_items(value: Any) -> bool:
+            # Cached list columns may come back as real lists/deserialized
+            # JSON or as raw JSON strings depending on the read path.
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    return False
+            return isinstance(value, list) and len(value) > 0
+
+        return (
+            _has_text(cached.get("company_summary"))
+            and _has_items(cached.get("services_offered"))
+            and _has_items(cached.get("pain_points"))
+            and _has_items(cached.get("sales_opportunities"))
+        )
+
+    def get_or_generate_intelligence(self, lead_id: int, business_profile: Dict[str, Any], context: str) -> Dict[str, Any]:
         # 1. Check cache
         cached = get_ai_insights_by_lead_id(lead_id)
-        if cached:
+        if cached and self._is_cache_valid(cached):
             return dict(cached)
+
+        if cached:
+            print(f"AI Intelligence cache for lead {lead_id} is invalid; regenerating.")
 
         # 2. Generate via Provider
         try:
-            insights = self.provider.generate_intelligence(website, company_name, context)
+            insights = self.provider.generate_intelligence(business_profile, context)
 
-            # 3. Persist to DB
+            # 3. Persist to DB (upsert overwrites the existing invalid row)
             upsert_ai_insights(
                 lead_id=lead_id,
                 insights=insights,
