@@ -42,6 +42,8 @@ class DiscoveryRunSummary:
     total_new: int = 0
     per_source: Dict[str, SourceRunSummary] = field(default_factory=dict)
     leads: List[UnifiedLead] = field(default_factory=list)
+    # Phase 18C — populated after dedupe‑and‑score.  Each element is a ScoredLead.
+    scored_leads: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -198,15 +200,21 @@ class LeadDiscoveryEngine:
                 summary.leads.extend([])  # placeholder for future dedupe
 
         # ------------------------------------------------------------------
-        # 5. Deduplication (new stage – Phase 18B)
+        # 5. Deduplication (Phase 18B)
         # ------------------------------------------------------------------
         from scraper.deduplication.deduper import LeadDeduper
         deduper = LeadDeduper()
         deduped_leads = deduper.deduplicate(summary.leads)
-        # Replace the leads list with the deduplicated version and update counts
         summary.leads = deduped_leads
         summary.total_new = len(deduped_leads)
         # ``total_found`` already reflects the raw number of candidates; we keep
         # it unchanged because it represents discovery volume before dedup.
+
+        # ------------------------------------------------------------------
+        # 6. Lead Scoring (Phase 18C)
+        # ------------------------------------------------------------------
+        from scraper.scoring.scoring_service import LeadScoringService
+        scoring_service = LeadScoringService()
+        summary.scored_leads = scoring_service.score(deduped_leads)
 
         return summary

@@ -1,6 +1,10 @@
 """Concrete normalizer implementations.
 
-Phase 16A — this package contains NO normalizer classes yet.  It exists only
-to reserve the namespace so future phases can drop modules here without
-touching the framework.
+Importing this package causes all bundled normalizers to register themselves
+with ``scraper.discovery.normalizers.registry.default_registry``.
 """
+
+from . import google_search as google_search  # noqa: F401
+from . import website as website  # noqa: F401
+
+__all__ = ["google_search", "website"]

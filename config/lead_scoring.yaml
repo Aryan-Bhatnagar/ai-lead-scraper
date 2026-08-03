@@ -1,0 +1,68 @@
+# Lead Scoring Configuration
+# All weights must be between 0 and 100. The sum of all weights (total = 100)
+# determines each feature's contribution to the overall 0-100 score.
+#
+# Each feature produces a sub-score: weight × quality_ratio
+# where quality_ratio is a 0.0-1.0 value derived from the lead's data.
+
+features:
+  website_exists:
+    weight: 25
+    description: "Lead has a website URL"
+    enabled: true
+
+  business_email:
+    weight: 20
+    description: "Lead has a business email address (non-generic domain)"
+    enabled: true
+
+  phone_number:
+    weight: 15
+    description: "Lead has at least one phone number"
+    enabled: true
+
+  description_quality:
+    weight: 9
+    description: "Quality of the company description (length, keyword richness)"
+    enabled: true
+
+  location_quality:
+    weight: 8
+    description: "Location data completeness (city, region, country)"
+    enabled: true
+
+  multiple_sources:
+    weight: 10
+    description: "Lead discovered by more than one provider"
+    enabled: true
+
+  social_profiles:
+    weight: 3
+    description: "Lead has social media profile links"
+    enabled: true
+
+  company_size_hints:
+    weight: 3
+    description: "Company has review counts, categories indicating size"
+    enabled: true
+
+  recent_activity:
+    weight: 2
+    description: "Lead data is recent and indicates active business"
+    enabled: true
+
+  provider_confidence:
+    weight: 2
+    description: "Original discovery provider's confidence score"
+    enabled: true
+
+  ai_enrichment_confidence:
+    weight: 3
+    description: "AI enrichment succeeded and provided additional data"
+    enabled: true
+
+# Minimum thresholds below which a lead is considered low-quality
+thresholds:
+  low_quality: 30
+  medium_quality: 55
+  high_quality: 75
