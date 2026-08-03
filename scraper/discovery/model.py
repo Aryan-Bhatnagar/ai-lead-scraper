@@ -45,9 +45,15 @@ class UnifiedLead:
     """
 
     # --- Identity ---
+    id: Optional[str] = None
     canonical_domain: Optional[str] = None
     company_name_norm: Optional[str] = None
     external_ids: Dict[str, str] = field(default_factory=dict)
+
+    @property
+    def lead_id(self) -> Optional[str]:
+        """Alias for ``id`` to match legacy test expectations."""
+        return self.id
 
     # --- Core ---
     company_name: Optional[str] = None
@@ -55,6 +61,7 @@ class UnifiedLead:
     description: Optional[str] = None
     industry: Optional[str] = None
     location: LocationData = field(default_factory=LocationData)
+    lifecycle: Optional[LifecycleState] = None
 
     # --- Contact ---
     emails: List[str] = field(default_factory=list)

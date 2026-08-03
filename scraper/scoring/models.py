@@ -92,3 +92,8 @@ class ScoredLead:
     @property
     def website(self) -> str:
         return self.lead.website or ""
+
+    @property
+    def lifecycle(self):
+        """Delegate lifecycle to the underlying lead."""
+        return self.lead.lifecycle

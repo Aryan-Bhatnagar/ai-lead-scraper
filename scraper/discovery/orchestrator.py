@@ -6,6 +6,7 @@ Orchestrates execution of multiple DiscoveryProviders with:
 * per-provider enable/disable
 * execution-order control
 * aggregation into ``DiscoveryRunSummary``
+* optional persistence of results via a :class:`LeadRepository`
 
 The orchestrator has no knowledge of provider internals — it interacts
 with providers only through the :class:`DiscoveryProvider` interface
@@ -61,6 +62,10 @@ class DiscoveryOrchestrator:
     engine:
         Optional pre-configured :class:`LeadDiscoveryEngine`; a new one is
         created from ``registry``/``max_workers`` when omitted.
+    repository:
+        Optional :class:`LeadRepository` for persisting discovered leads.
+        If provided, the orchestrator will call ``persist_results`` after
+        a successful run to store the scored leads.
     """
 
     def __init__(
@@ -72,6 +77,7 @@ class DiscoveryOrchestrator:
         retry_backoff: float = 0.5,
         max_workers: int = 8,
         engine: Optional[LeadDiscoveryEngine] = None,
+        repository: Optional[object] = None,  # We'll accept any object that has persist_orchestrator_summary or bulk_insert
     ) -> None:
         self.registry = registry
         self.provider_order: List[str] = (
@@ -84,6 +90,7 @@ class DiscoveryOrchestrator:
         self.engine = engine or LeadDiscoveryEngine(
             registry=registry, max_workers=max_workers
         )
+        self.repository = repository
 
     # ------------------------------------------------------------------
     # Public API
@@ -100,6 +107,7 @@ class DiscoveryOrchestrator:
         1. Resolve the active provider list (order, enable/disable, sources).
         2. Optionally pre-execute providers with retries, collecting batches.
         3. Delegate aggregation to the engine (normalization → dedup → scoring).
+        4. Optionally persist results via the configured repository.
 
         Parameters
         ----------
@@ -122,13 +130,38 @@ class DiscoveryOrchestrator:
         # Fast path — no retries configured: let the engine handle everything
         # (it already fans out providers concurrently and aggregates).
         if self.max_retries <= 0:
-            return self.engine.run(query, sources=active)
+            summary = self.engine.run(query, sources=active)
+        else:
+            # Retry path — execute providers here so transient failures can be
+            # retried, then feed the collected batches to the engine for the
+            # normalization → dedupe → scoring aggregation.
+            batches = self._execute_with_retries(active, query)
+            summary = self._aggregate(query, batches, active)
 
-        # Retry path — execute providers here so transient failures can be
-        # retried, then feed the collected batches to the engine for the
-        # normalization → dedupe → scoring aggregation.
-        batches = self._execute_with_retries(active, query)
-        return self._aggregate(query, batches, active)
+        # Persist results if a repository is configured
+        if self.repository is not None:
+            self.persist_results(summary)
+
+        return summary
+
+    def persist_results(self, summary: DiscoveryRunSummary) -> None:
+        """Persist the scored leads from a discovery run.
+
+        This method is called by the orchestrator after a successful run when a
+        repository is provided. It expects the summary to have a ``scored_leads``
+        attribute (list of ScoredLead).
+
+        Parameters
+        ----------
+        summary:
+            The result of a discovery run.
+        """
+        if hasattr(summary, 'scored_leads'):
+            leads = getattr(summary, 'scored_leads', [])
+            if leads:
+                # The repository's bulk_insert expects an iterable of UnifiedLead or ScoredLead.
+                # We have ScoredLead objects, so we can pass them directly.
+                self.repository.bulk_insert(leads)
 
     def set_provider_enabled(self, name: str, enabled: bool) -> None:
         """Enable or disable a provider by name."""
