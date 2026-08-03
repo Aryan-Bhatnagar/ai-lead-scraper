@@ -11,6 +11,7 @@ from .provider import DiscoveryProvider
 from .providers.website_provider import WebsiteDiscoveryProvider
 from .providers.upwork_provider import UpworkDiscoveryProvider
 from .providers.google_search_provider import GoogleSearchDiscoveryProvider
+from .providers.google_maps_provider import GoogleMapsDiscoveryProvider
 
 class ProviderRegistry:
     """In-memory registry mapping provider name → provider instance.
@@ -50,3 +51,4 @@ default_registry = ProviderRegistry()
 default_registry.register(WebsiteDiscoveryProvider())
 default_registry.register(UpworkDiscoveryProvider())
 default_registry.register(GoogleSearchDiscoveryProvider())
+default_registry.register(GoogleMapsDiscoveryProvider())

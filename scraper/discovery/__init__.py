@@ -9,6 +9,7 @@ from .query import DiscoveryQuery, DiscoveryBatch, RawCandidate, SourceMeta
 from .provider import DiscoveryProvider, CapabilitySet, ProviderResponse as ProviderDiscoveryResponse
 from .registry import ProviderRegistry, default_registry
 from .engine import LeadDiscoveryEngine, DiscoveryRunSummary, SourceRunSummary
+from .orchestrator import DiscoveryOrchestrator, DEFAULT_PROVIDER_ORDER
 
 __all__ = [
     # model.py
@@ -31,4 +32,7 @@ __all__ = [
     "LeadDiscoveryEngine",
     "DiscoveryRunSummary",
     "SourceRunSummary",
+    # orchestrator.py
+    "DiscoveryOrchestrator",
+    "DEFAULT_PROVIDER_ORDER",
 ]
