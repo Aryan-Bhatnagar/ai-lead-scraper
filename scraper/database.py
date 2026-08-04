@@ -534,15 +534,18 @@ def upsert_lead(lead: dict, db_path: Path | str = DB_PATH) -> int:
     update_clause = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
 
     with get_connection(db_path) as conn:
+        # Determine lead_status to insert (default 'NEW' if not provided)
+        lead_status_val = lead.get("lead_status", "NEW")
+        # Insert with lead_status, but do not update lead_status on conflict
         conn.execute(
             f"""
-            INSERT INTO leads ({columns}, created_at, updated_at)
-            VALUES ({placeholders}, :now, :now)
+            INSERT INTO leads ({columns}, lead_status, created_at, updated_at)
+            VALUES ({placeholders}, :lead_status, :now, :now)
             ON CONFLICT(source_url) DO UPDATE SET
                 {update_clause},
                 updated_at = excluded.updated_at
             """,
-            {**values, "now": now},
+            {**values, "lead_status": lead_status_val, "now": now},
         )
         row = conn.execute(
             "SELECT id FROM leads WHERE source_url = ?", (values["source_url"],)

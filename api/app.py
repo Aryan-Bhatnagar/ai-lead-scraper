@@ -26,7 +26,7 @@ by the tests.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List
 
 from flask import Flask, jsonify, request, abort
 import json
@@ -40,6 +40,13 @@ from flask_cors import CORS
 # straightforward – the test suite changes the ``DATABASE`` key before
 # calling ``create_app``.
 import scraper.database as db
+from api.services import lead_service
+from scraper.persistence.lifecycle import LifecycleEngine, InvalidLifecycleTransition
+from scraper.analytics.analytics_service import AnalyticsService
+from api.services.recommendation_service import RecommendationService
+
+from scraper.lead_discovery import discover_leads
+from scraper.google_maps_discovery import discover_google_maps
 
 from scraper.lead_discovery import discover_leads
 from scraper.google_maps_discovery import discover_google_maps
@@ -191,6 +198,323 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             app.config["DATABASE"],
         )
         return jsonify(lead), 200
+
+    # -------------------------------------------------------------------
+    # Lead CRUD endpoints (Phase 20A)
+    # -------------------------------------------------------------------
+    @app.route("/api/leads", methods=["POST"])
+    def create_lead():
+        """Create a new lead."""
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+
+        # Validate required fields
+        if not payload.get("source_url"):
+            abort(400, description="Lead must have a source_url")
+
+        try:
+            lead_id = lead_service.create_lead(app.config["DATABASE"], payload)
+            lead = lead_service.get_lead_by_id(app.config["DATABASE"], lead_id)
+            return jsonify(lead), 201
+        except ValueError as e:
+            abort(400, description=str(e))
+        except Exception as e:
+            app.logger.exception("Lead creation failed")
+            abort(500, description=f"Lead creation failed: {str(e)}")
+
+    @app.route("/api/leads/<int:lead_id>", methods=["PUT"])
+    def update_lead(lead_id: int):
+        """Update a lead by ID."""
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+
+        # Prevent updating source_url via this endpoint
+        if "source_url" in payload:
+            abort(400, description="Cannot update source_url via this endpoint")
+
+        # First check if lead exists
+        existing_lead = lead_service.get_lead_by_id(app.config["DATABASE"], lead_id)
+        if not existing_lead:
+            abort(404, description="Lead not found")
+
+        try:
+            updated = lead_service.update_lead(app.config["DATABASE"], lead_id, payload)
+            if not updated:
+                # This shouldn't happen if the lead exists, but handle just in case
+                abort(400, description="Lead update failed")
+            lead = lead_service.get_lead_by_id(app.config["DATABASE"], lead_id)
+            return jsonify(lead), 200
+        except Exception as e:
+            app.logger.exception("Lead update failed")
+            abort(500, description=f"Lead update failed: {str(e)}")
+
+    @app.route("/api/leads/bulk", methods=["POST"])
+    def create_leads_bulk():
+        """Create multiple leads."""
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+
+        leads = payload.get("leads")
+        if not isinstance(leads, list):
+            abort(400, description="'leads' must be a list")
+        if len(leads) == 0:
+            abort(400, description="'leads' list cannot be empty")
+
+        try:
+            lead_ids = lead_service.bulk_create_leads(app.config["DATABASE"], leads)
+            return jsonify({"lead_ids": lead_ids, "count": len(lead_ids)}), 201
+        except Exception as e:
+            app.logger.exception("Bulk lead creation failed")
+            abort(500, description=f"Bulk lead creation failed: {str(e)}")
+
+    @app.route("/api/leads/search", methods=["GET"])
+    def search_leads():
+        """Search leads by various criteria."""
+        # Extract query parameters
+        filters = {}
+        if request.args.get("company"):
+            filters["company_name"] = request.args.get("company")
+        if request.args.get("website"):
+            filters["website"] = request.args.get("website")
+        if request.args.get("country"):
+            filters["country"] = request.args.get("country")
+        if request.args.get("city"):
+            filters["city"] = request.args.get("city")
+        if request.args.get("min_score"):
+            try:
+                filters["min_score"] = int(request.args.get("min_score"))
+            except ValueError:
+                abort(400, description="'min_score' must be an integer")
+        if request.args.get("max_score"):
+            try:
+                filters["max_score"] = int(request.args.get("max_score"))
+            except ValueError:
+                abort(400, description="'max_score' must be an integer")
+        if request.args.get("quality_tier"):
+            filters["quality_tier"] = request.args.get("quality_tier")
+        if request.args.get("source"):
+            filters["source"] = request.args.get("source")
+        if request.args.get("status"):
+            filters["status"] = request.args.get("status")
+        if request.args.get("lead_status"):
+            filters["lead_status"] = request.args.get("lead_status")
+
+        # Pagination
+        try:
+            limit = int(request.args.get("limit", 50))
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            abort(400, description="'limit' and 'offset' must be integers")
+
+        # Sorting
+        sort_by = request.args.get("sort_by")
+        sort_desc = request.args.get("sort_desc", "false").lower() == "true"
+
+        try:
+            leads = lead_service.get_leads(
+                app.config["DATABASE"],
+                filters=filters if filters else None,
+                sort_by=sort_by,
+                sort_desc=sort_desc,
+                limit=limit,
+                offset=offset,
+            )
+            total = lead_service.count_leads(app.config["DATABASE"], filters=filters if filters else None)
+            return jsonify({
+                "leads": leads,
+                "count": len(leads),
+                "total": total,
+                "limit": limit,
+                "offset": offset
+            }), 200
+        except Exception as e:
+            app.logger.exception("Lead search failed")
+            abort(500, description=f"Lead search failed: {str(e)}")
+
+    @app.route("/api/leads/filter", methods=["GET"])
+    def filter_leads():
+        """Filter leads (alias for search with same functionality)."""
+        return search_leads()
+
+    @app.route("/api/leads/<int:lead_id>/lifecycle", methods=["PATCH"])
+    def update_lead_lifecycle(lead_id: int):
+        """Update a lead's lifecycle status with validation."""
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+
+        new_status = payload.get("lead_status")
+        if not new_status:
+            abort(400, description="Missing 'lead_status' field")
+
+        # First, check if lead exists
+        lead = lead_service.get_lead_by_id(app.config["DATABASE"], lead_id)
+        if not lead:
+            abort(404, description="Lead not found")
+
+        # Validate the lifecycle transition
+        current_status = lead.get("lead_status", "NEW")
+        try:
+            LifecycleEngine.validate(current_status, new_status)
+        except InvalidLifecycleTransition:
+            abort(400, description=f"Invalid lifecycle transition from '{current_status}' to '{new_status}'")
+
+        # Update the lead's lifecycle status
+        try:
+            updated = lead_service.update_lead(app.config["DATABASE"], lead_id, {"lead_status": new_status})
+            if not updated:
+                abort(500, description="Failed to update lead")
+            updated_lead = lead_service.get_lead_by_id(app.config["DATABASE"], lead_id)
+            return jsonify(updated_lead), 200
+        except Exception as e:
+            app.logger.exception("Lifecycle update failed")
+            abort(500, description=f"Lifecycle update failed: {str(e)}")
+
+    @app.route("/api/leads/statistics", methods=["GET"])
+    def get_lead_statistics():
+        """Get lead statistics."""
+        try:
+            stats = lead_service.get_lead_statistics(app.config["DATABASE"])
+            return jsonify(stats), 200
+        except Exception as e:
+            app.logger.exception("Failed to get lead statistics")
+            abort(500, description=f"Failed to get lead statistics: {str(e)}")
+
+    # -------------------------------------------------------------------
+    # Analytics endpoints (Phase 21A)
+    # -------------------------------------------------------------------
+    @app.route("/api/analytics/overview", methods=["GET"])
+    def analytics_overview():
+        """Get analytics overview."""
+        try:
+            analytics_service = AnalyticsService(app.config["DATABASE"])
+            data = analytics_service.get_overview()
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Analytics overview failed")
+            abort(500, description=f"Analytics overview failed: {str(e)}")
+
+    @app.route("/api/analytics/trends", methods=["GET"])
+    def analytics_trends():
+        """Get analytics trends."""
+        try:
+            analytics_service = AnalyticsService(app.config["DATABASE"])
+            data = analytics_service.get_trends()
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Analytics trends failed")
+            abort(500, description=f"Analytics trends failed: {str(e)}")
+
+    @app.route("/api/analytics/quality", methods=["GET"])
+    def analytics_quality():
+        """Get analytics quality."""
+        try:
+            analytics_service = AnalyticsService(app.config["DATABASE"])
+            data = analytics_service.get_quality_analytics()
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Analytics quality failed")
+            abort(500, description=f"Analytics quality failed: {str(e)}")
+
+    @app.route("/api/analytics/providers", methods=["GET"])
+    def analytics_providers():
+        """Get analytics providers."""
+        try:
+            analytics_service = AnalyticsService(app.config["DATABASE"])
+            data = analytics_service.get_provider_analytics()
+            # Return the list of providers directly
+            return jsonify(data["providers"]), 200
+        except Exception as e:
+            app.logger.exception("Analytics providers failed")
+            abort(500, description=f"Analytics providers failed: {str(e)}")
+
+    @app.route("/api/analytics/lifecycle", methods=["GET"])
+    def analytics_lifecycle():
+        """Get analytics lifecycle."""
+        try:
+            analytics_service = AnalyticsService(app.config["DATABASE"])
+            data = analytics_service.get_lifecycle_distribution()
+            # Return the lifecycle distribution dict directly
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Analytics lifecycle failed")
+            abort(500, description=f"Analytics lifecycle failed: {str(e)}")
+
+    @app.route("/api/analytics/insights", methods=["GET"])
+    def analytics_insights():
+        """Get analytics insights."""
+        try:
+            analytics_service = AnalyticsService(app.config["DATABASE"])
+            data = analytics_service.get_insights()
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Analytics insights failed")
+            abort(500, description=f"Analytics insights failed: {str(e)}")
+
+    # -------------------------------------------------------------------
+    # Recommendation endpoints (Phase 21B)
+    # -------------------------------------------------------------------
+    @app.route("/api/recommendations", methods=["GET"])
+    def recommendations_list():
+        """Get recommendations for all leads."""
+        try:
+            rec_service = RecommendationService(app.config["DATABASE"])
+            data = rec_service.get_recommendations()
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Recommendations list failed")
+            abort(500, description=f"Recommendations list failed: {str(e)}")
+
+    @app.route("/api/recommendations/<int:lead_id>", methods=["GET"])
+    def recommendation_detail(lead_id: int):
+        """Get recommendation for a specific lead."""
+        try:
+            rec_service = RecommendationService(app.config["DATABASE"])
+            data = rec_service.get_recommendation(lead_id)
+            return jsonify(data), 200
+        except ValueError as e:
+            abort(404, description=str(e))
+        except Exception as e:
+            app.logger.exception("Recommendation detail failed")
+            abort(500, description=f"Recommendation detail failed: {str(e)}")
+
+    @app.route("/api/recommendations/summary", methods=["GET"])
+    def recommendations_summary():
+        """Get summary of recommendations."""
+        try:
+            rec_service = RecommendationService(app.config["DATABASE"])
+            data = rec_service.get_recommendations_summary()
+            return jsonify(data), 200
+        except Exception as e:
+            app.logger.exception("Recommendations summary failed")
+            abort(500, description=f"Recommendations summary failed: {str(e)}")
 
     # -------------------------------------------------------------------
     # Outreach Queue endpoints (Phase 10B)

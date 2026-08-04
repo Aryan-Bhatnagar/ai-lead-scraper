@@ -1,111 +1,177 @@
-import React, { useState, useEffect, useMemo } from 'react'
-import { Search, RefreshCcw, Filter } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Users, Trophy, Gauge, Star, RefreshCcw } from 'lucide-react'
 import toast from 'react-hot-toast'
-
 import PageHeader from '../../components/layout/PageHeader'
-import EmptyState from '../../components/layout/EmptyState'
-import LoadingSpinner from '../../components/layout/LoadingSpinner'
+import StatCard from '../../components/reusable/StatCard'
+import SearchBar from '../../components/reusable/SearchBar'
+import FilterPanel, { FilterSelect, ScoreRangeFilter } from '../../components/reusable/FilterPanel'
+import LeadTable from '../../components/repository/LeadTable'
+import LeadDetailsDrawer from '../../components/repository/LeadDetailsDrawer'
+import EmptyState from '../../components/reusable/EmptyState'
 import { Database } from 'lucide-react'
-
-import LeadTable from '../../components/leads/LeadTable'
-import LeadDetailsModal from '../../components/leads/LeadDetailsModal'
-import DeleteLeadDialog from '../../components/leads/DeleteLeadDialog'
-import LeadSummaryCard from '../../components/leads/LeadSummaryCard'
+import { useLeads, useAllLeads } from '../../hooks/useLeads'
+import { getLeadStatistics } from '../../services/leadsService'
+import { downloadCsv } from '../../utils/exportCsv'
+import { mapLeadForExport } from '../../services/adapters'
 
 export default function Leads() {
-  const [leads, setLeads] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [selectedLeadSummary, setSelectedLeadSummary] = useState(null)
 
-  // Filters state
+  // Search + filters (debounced for the server round-trip)
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('All')
-  const [industryFilter, setIndustryFilter] = useState('All')
+  const [sourceFilter, setSourceFilter] = useState('All')
+  const [lifecycleFilter, setLifecycleFilter] = useState('All')
+  const [countryFilter, setCountryFilter] = useState('All')
+  const [qualityFilter, setQualityFilter] = useState('All')
+  const [scoreMin, setScoreMin] = useState(null)
+  const [scoreMax, setScoreMax] = useState(null)
+  const [page, setPage] = useState(1)
+  const [sortBy, setSortBy] = useState('quality_score')
+  const [sortDesc, setSortDesc] = useState(true)
 
-  // Modal states
-  const [selectedLead, setSelectedLead] = useState(null)
-  const [leadToDelete, setLeadToDelete] = useState(null)
-
-  const fetchLeads = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await fetch('/api/leads')
-      if (!response.ok) throw new Error('Failed to fetch leads')
-      const data = await response.json()
-      setLeads(data.leads || [])
-    } catch (err) {
-      setError(err.message)
-      toast.error('Failed to load leads')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const PAGE_SIZE = 8
 
   useEffect(() => {
-    fetchLeads()
-  }, [])
+    const t = setTimeout(() => setSearch(searchInput), 350)
+    return () => clearTimeout(t)
+  }, [searchInput])
 
-  // Derived State
-  const filteredLeads = useMemo(() => {
-    return leads.filter(lead => {
-      const matchesSearch =
-        !search ||
-        (lead.company_name || '').toLowerCase().includes(search.toLowerCase()) ||
-        (lead.website || '').toLowerCase().includes(search.toLowerCase()) ||
-        (lead.email || '').toLowerCase().includes(search.toLowerCase()) ||
-        (lead.city || '').toLowerCase().includes(search.toLowerCase()) ||
-        (lead.country || '').toLowerCase().includes(search.toLowerCase());
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1)
+  }, [search, sourceFilter, lifecycleFilter, countryFilter, qualityFilter, scoreMin, scoreMax])
 
-      const matchesStatus = statusFilter === 'All' || lead.lead_status === statusFilter;
-      const matchesIndustry = industryFilter === 'All' || lead.industry === industryFilter;
+  const isSearching = !!search
 
-      return matchesSearch && matchesStatus && matchesIndustry;
-    })
-  }, [leads, search, statusFilter, industryFilter])
+  const { leads, total, loading, error, refetch } = useLeads({
+    search,
+    source: sourceFilter === 'All' ? null : sourceFilter,
+    lifecycle: lifecycleFilter === 'All' ? null : lifecycleFilter,
+    country: countryFilter === 'All' ? null : countryFilter,
+    quality: qualityFilter === 'All' ? null : qualityFilter,
+    scoreMin,
+    scoreMax,
+    sortBy,
+    sortDesc,
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  })
 
-  const uniqueIndustries = useMemo(() => {
-    const industries = new Set(leads.map(l => l.industry).filter(Boolean))
-    return Array.from(industries).sort()
-  }, [leads])
-
-  const stats = useMemo(() => ({
-    total: leads.length,
-    enriched: leads.filter(l => l.lead_status === 'Enriched').length,
-    email: leads.filter(l => l.email).length,
-    website: leads.filter(l => l.website).length,
-  }), [leads])
-
-  const handleDeleteLead = async () => {
-    if (!leadToDelete) return
-
-    try {
-      const response = await fetch(`/api/leads/${leadToDelete.id}`, {
-        method: 'DELETE',
+  // Stats from the statistics endpoint
+  const [stats, setStats] = useState({ total: 0, scored: 0, avg: 0, high: 0 })
+  const loadStats = () => {
+    getLeadStatistics()
+      .then((s) => {
+        const distribution = s.lifecycle_distribution || {}
+        const highQuality = (s.quality_distribution?.excellent || 0) + (s.quality_distribution?.good || 0)
+        setStats({
+          total: s.total_leads ?? 0,
+          scored: Object.values(distribution).reduce((a, b) => a + b, 0),
+          avg: Math.round(s.average_score ?? 0),
+          high: highQuality,
+        })
       })
-      if (!response.ok) throw new Error('Failed to delete lead')
+      .catch(() => {})
+  }
+  useEffect(loadStats, [total])
 
-      setLeads(prev => prev.filter(l => l.id !== leadToDelete.id))
-      toast.success('Lead deleted successfully')
-    } catch (err) {
-      toast.error('Error deleting lead')
-    } finally {
-      setLeadToDelete(null)
-    }
+  // Non-search mode: client-side filter/sort/paginate over the unpaginated list
+  const { leads: clientLeads } = useAllLeads({ enabled: !isSearching })
+  const processedLeads = useMemo(() => {
+    if (isSearching) return leads
+    let rows = [...clientLeads]
+    if (sourceFilter !== 'All') rows = rows.filter((l) => l.source.includes(sourceFilter))
+    if (lifecycleFilter !== 'All') rows = rows.filter((l) => l.lifecycle === lifecycleFilter)
+    if (countryFilter !== 'All') rows = rows.filter((l) => l.country === countryFilter)
+    if (qualityFilter !== 'All') rows = rows.filter((l) => l.quality_tier === qualityFilter)
+    if (scoreMin != null) rows = rows.filter((l) => l.score >= scoreMin)
+    if (scoreMax != null) rows = rows.filter((l) => l.score <= scoreMax)
+    rows.sort((a, b) => {
+      const get = (k) => (k === 'quality_score' ? a.score : k === 'company_name' ? a.company_name.toLowerCase() : a[k])
+      const getB = (k) => (k === 'quality_score' ? b.score : k === 'company_name' ? b.company_name.toLowerCase() : b[k])
+      const av = get(sortBy)
+      const bv = getB(sortBy)
+      if (av == null) return 1
+      if (bv == null) return -1
+      if (typeof av === 'string') return sortDesc ? bv.localeCompare(av) : av.localeCompare(bv)
+      return sortDesc ? bv - av : av - bv
+    })
+    return rows
+  }, [isSearching, leads, clientLeads, sourceFilter, lifecycleFilter, countryFilter, qualityFilter, scoreMin, scoreMax, sortBy, sortDesc])
+
+  const totalRows = isSearching ? total : processedLeads.length
+  const pageLeads = isSearching ? leads : processedLeads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  // Drawer
+  const openLead = (lead) => setSelectedLeadSummary(lead)
+
+  // Filter options derived from the loaded set
+  const filterPool = isSearching ? leads : clientLeads
+  const countries = useMemo(
+    () => [...new Set(filterPool.map((l) => l.country).filter(Boolean))].sort(),
+    [filterPool]
+  )
+  const sources = useMemo(
+    () => [...new Set(filterPool.map((l) => l.source).filter(Boolean))].sort(),
+    [filterPool]
+  )
+  const lifecycles = useMemo(
+    () => [...new Set(filterPool.map((l) => l.lifecycle).filter(Boolean))].sort(),
+    [filterPool]
+  )
+  const qualities = ['high', 'medium', 'low', 'unknown']
+
+  const activeFilterCount = [
+    sourceFilter !== 'All',
+    lifecycleFilter !== 'All',
+    countryFilter !== 'All',
+    qualityFilter !== 'All',
+    scoreMin != null,
+    scoreMax != null,
+  ].filter(Boolean).length
+
+  const resetFilters = () => {
+    setSourceFilter('All')
+    setLifecycleFilter('All')
+    setCountryFilter('All')
+    setQualityFilter('All')
+    setScoreMin(null)
+    setScoreMax(null)
+    setSearchInput('')
   }
 
-  if (error) {
+  const handleRefresh = () => {
+    refetch()
+    loadStats()
+  }
+
+  const statCards = [
+    { title: 'Total Leads', value: stats.total, icon: Users, color: 'primary' },
+    { title: 'Scored Leads', value: stats.scored, icon: Trophy, color: 'success' },
+    { title: 'Average Score', value: stats.avg, icon: Gauge, color: 'warning' },
+    { title: 'High Quality', value: stats.high, icon: Star, color: 'danger' },
+  ]
+
+  if (error && !loading && pageLeads.length === 0) {
     return (
-      <div className="p-8 text-center">
-        <div className="bg-red-50 text-red-600 p-4 rounded-lg mb-4 max-w-md mx-auto">
-          {error}
+      <div>
+        <PageHeader title="Lead Repository" subtitle="Persisted, scored and deduplicated leads across every discovery source." />
+        <div className="glass-card rounded-2xl p-12 text-center animate-fade-up">
+          <EmptyState
+            icon={Database}
+            title="Unable to reach the backend"
+            description={String(error) || 'Check that the API server is running, then retry.'}
+          >
+            <button
+              onClick={handleRefresh}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              <RefreshCcw className="w-4 h-4" />
+              Retry
+            </button>
+          </EmptyState>
         </div>
-        <button
-          onClick={fetchLeads}
-          className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors flex items-center gap-2 mx-auto"
-        >
-          <RefreshCcw size={16} /> Retry
-        </button>
       </div>
     )
   }
@@ -113,103 +179,94 @@ export default function Leads() {
   return (
     <div>
       <PageHeader
-        title="Prospect Database"
-        subtitle="Manage and view all collected prospects."
-      />
+        title="Lead Repository"
+        subtitle="Persisted, scored and deduplicated leads across every discovery source."
+      >
+        <button
+          onClick={handleRefresh}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors disabled:opacity-50"
+        >
+          <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </PageHeader>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <LeadSummaryCard title="Total Prospects" value={stats.total} type="total" />
-        <LeadSummaryCard title="Enriched Prospects" value={stats.enriched} type="enriched" />
-        <LeadSummaryCard title="Prospects with Email" value={stats.email} type="email" />
-        <LeadSummaryCard title="Prospects with Website" value={stats.website} type="website" />
+      {/* Summary stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {statCards.map((card, i) => (
+          <div key={card.title} className={`animate-fade-up stagger-${i + 1}`}>
+            <StatCard {...card} />
+          </div>
+        ))}
       </div>
 
       {/* Controls */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex flex-col lg:flex-row gap-4 items-center justify-between">
-        <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
-          <div className="relative w-full sm:w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="text"
-              placeholder="Search prospects..."
-              className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <div className="relative">
-              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-              <select
-                className="pl-9 pr-4 py-2 border border-slate-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 appearance-none cursor-pointer"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="All">All Status</option>
-                <option value="New">New</option>
-                <option value="Enriched">Enriched</option>
-              </select>
-            </div>
-
-            <div className="relative">
-              <select
-                className="pl-3 pr-8 py-2 border border-slate-200 rounded-lg bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 appearance-none cursor-pointer"
-                value={industryFilter}
-                onChange={(e) => setIndustryFilter(e.target.value)}
-              >
-                <option value="All">All Industries</option>
-                {uniqueIndustries.map(ind => (
-                  <option key={ind} value={ind}>{ind}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+      <div className="glass-card rounded-2xl p-4 mb-6 space-y-4 animate-fade-up">
+        <div className="flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+          <SearchBar
+            value={searchInput}
+            onChange={setSearchInput}
+            placeholder="Search company, website, contact, location…"
+            className="w-full lg:max-w-md"
+          />
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="font-semibold text-slate-700 dark:text-slate-200">{totalRows}</span> leads
+            {isSearching && ' (filtered)'}
+          </p>
         </div>
 
-        <button
-          onClick={fetchLeads}
-          disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors disabled:opacity-50"
-        >
-          <RefreshCcw size={16} className={loading ? 'animate-spin' : ''} />
-          Refresh Data
-        </button>
+        <FilterPanel onReset={resetFilters} activeCount={activeFilterCount}>
+          <FilterSelect label="Source" value={sourceFilter} onChange={setSourceFilter} options={sources} allLabel="All Sources" />
+          <FilterSelect label="Lifecycle" value={lifecycleFilter} onChange={setLifecycleFilter} options={lifecycles} allLabel="All Stages" />
+          <FilterSelect label="Country" value={countryFilter} onChange={setCountryFilter} options={countries} allLabel="All Countries" />
+          <FilterSelect label="Quality" value={qualityFilter} onChange={setQualityFilter} options={qualities} allLabel="All Quality" />
+          <ScoreRangeFilter min={scoreMin} max={scoreMax} onMinChange={setScoreMin} onMaxChange={setScoreMax} />
+        </FilterPanel>
       </div>
 
-      {/* Main Content */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <LoadingSpinner size="lg" text="Loading prospects..." />
-        </div>
-      ) : filteredLeads.length === 0 ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-12">
+      {/* Table */}
+      {!loading && pageLeads.length === 0 ? (
+        <div className="glass-card rounded-2xl animate-fade-up">
           <EmptyState
             icon={Database}
-            title="No Prospects Found"
-            description="Try adjusting your search or filters to find what you're looking for."
-          />
+            title="No leads match your filters"
+            description="Try broadening the search or clearing some filters to see more results."
+          >
+            <button
+              onClick={resetFilters}
+              className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+            >
+              Clear all filters
+            </button>
+          </EmptyState>
         </div>
       ) : (
         <LeadTable
-          leads={filteredLeads}
-          onView={setSelectedLead}
-          onDelete={setLeadToDelete}
+          leads={pageLeads}
+          loading={loading}
+          onView={openLead}
+          page={page}
+          totalPages={Math.max(1, Math.ceil(totalRows / PAGE_SIZE))}
+          totalItems={totalRows}
+          onPageChange={setPage}
+          sortBy={sortBy}
+          sortDesc={sortDesc}
+          onSort={(key) => {
+            if (sortBy === key) setSortDesc(!sortDesc)
+            else {
+              setSortBy(key)
+              setSortDesc(true)
+            }
+          }}
+          onExport={(rows) => {
+            downloadCsv(rows.map(mapLeadForExport), 'leads-export.csv')
+            toast.success(`Exported ${rows.length} lead${rows.length === 1 ? '' : 's'} to CSV`)
+          }}
         />
       )}
 
-      {/* Modals */}
-      <LeadDetailsModal
-        lead={selectedLead}
-        onClose={() => setSelectedLead(null)}
-      />
-      <DeleteLeadDialog
-        isOpen={!!leadToDelete}
-        leadName={leadToDelete?.company_name}
-        onClose={() => setLeadToDelete(null)}
-        onConfirm={handleDeleteLead}
-      />
+      <LeadDetailsDrawer lead={selectedLeadSummary} onClose={() => setSelectedLeadSummary(null)} />
     </div>
   )
 }
