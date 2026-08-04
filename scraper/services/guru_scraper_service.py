@@ -1,7 +1,7 @@
 """
-Upwork Scraper Service.
+Guru Scraper Service.
 
-Handles the raw data acquisition from Upwork via the Apify API.
+Handles the raw data acquisition from Guru via the Apify API.
 """
 
 import os
@@ -12,21 +12,21 @@ import logging
 # Setup logger
 logger = logging.getLogger(__name__)
 
-class UpworkScraperService(apify_base.ApifyScraperService):
+class GuruScraperService(apify_base.ApifyScraperService):
     """
-    Service layer for fetching Upwork job listings.
+    Service layer for fetching Guru job listings.
 
-    Uses the Apify Upwork Scraper actor to bypass bot protection
+    Uses the Apify Guru Scraper actor to bypass bot protection
     and receive structured JSON data.
     """
 
     def __init__(self):
-        """Initialize the Upwork scraper service with the Upwork actor ID."""
-        super().__init__(actor_id="apify/upwork-scraper")
+        """Initialize the Guru scraper service with the Guru actor ID."""
+        super().__init__(actor_id="apify/guru-scraper")
 
     def scrape_jobs(self, keywords: List[str], max_results: int = 20, location: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Search for jobs on Upwork based on keywords.
+        Search for jobs on Guru based on keywords.
 
         Args:
             keywords: List[str]: Search terms to use.
@@ -39,10 +39,10 @@ class UpworkScraperService(apify_base.ApifyScraperService):
         # Prepare the actor input
         query_string = " ".join(keywords)
 
-        # Input for the Apify Upwork Scraper actor
+        # Input for the Apify Guru Scraper actor
         run_input = {
             "queries": [query_string],
-            "maxItems": max_results,
+            "maxResults": max_results,
             "location": location,
         }
 

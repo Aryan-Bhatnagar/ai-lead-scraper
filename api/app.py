@@ -44,6 +44,7 @@ from api.services import lead_service
 from scraper.persistence.lifecycle import LifecycleEngine, InvalidLifecycleTransition
 from scraper.analytics.analytics_service import AnalyticsService
 from api.services.recommendation_service import RecommendationService
+from api.routes.opportunities import register_opportunities_routes
 
 from scraper.lead_discovery import discover_leads
 from scraper.google_maps_discovery import discover_google_maps
@@ -491,6 +492,11 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         except Exception as e:
             app.logger.exception("Recommendations list failed")
             abort(500, description=f"Recommendations list failed: {str(e)}")
+
+    # -------------------------------------------------------------------
+    # Opportunity endpoints (Phase 22A)
+    # -------------------------------------------------------------------
+    register_opportunities_routes(app)
 
     @app.route("/api/recommendations/<int:lead_id>", methods=["GET"])
     def recommendation_detail(lead_id: int):
