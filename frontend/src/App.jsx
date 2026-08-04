@@ -9,7 +9,6 @@ import Leads from './pages/Leads/Leads'
 import Outreach from './pages/Outreach/Outreach'
 import Analytics from './pages/Analytics/Analytics'
 import Settings from './pages/Settings/Settings'
-import Opportunities from './pages/Opportunities/Opportunities'
 
 export default function App() {
   return (
@@ -35,7 +34,6 @@ export default function App() {
           <Route path="/leads" element={<Leads />} />
           <Route path="/outreach" element={<Outreach />} />
           <Route path="/analytics" element={<Analytics />} />
-          <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
