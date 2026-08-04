@@ -15,7 +15,7 @@ export default function SourceBadge({ source }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${meta.classes}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset transition-shadow hover:shadow-sm ${meta.classes}`}
     >
       <Icon className="w-3 h-3" />
       {source}

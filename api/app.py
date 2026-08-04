@@ -45,6 +45,7 @@ from scraper.persistence.lifecycle import LifecycleEngine, InvalidLifecycleTrans
 from scraper.analytics.analytics_service import AnalyticsService
 from api.services.recommendation_service import RecommendationService
 from api.routes.opportunities import register_opportunities_routes
+from api.routes.dashboard import register_dashboard_routes
 
 from scraper.lead_discovery import discover_leads
 from scraper.google_maps_discovery import discover_google_maps
@@ -497,6 +498,8 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     # Opportunity endpoints (Phase 22A)
     # -------------------------------------------------------------------
     register_opportunities_routes(app)
+    register_dashboard_routes(app)
+    print("DEBUG: Dashboard routes registered")
 
     @app.route("/api/recommendations/<int:lead_id>", methods=["GET"])
     def recommendation_detail(lead_id: int):

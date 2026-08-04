@@ -1,4 +1,5 @@
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import useAnimatedCounter from '../../hooks/useAnimatedCounter'
 
 const COLOR_MAP = {
   primary: {
@@ -33,16 +34,22 @@ export default function StatCard({ title, value, icon: Icon, trend, trendValue, 
         ? 'text-danger-600 dark:text-danger-500'
         : 'text-slate-400'
 
+  const isNumeric = typeof value === 'number' && Number.isFinite(value)
+  const animated = useAnimatedCounter(isNumeric ? value : 0)
+  const displayValue = isNumeric ? animated.toLocaleString() : value
+
   return (
     <div
-      className={`glass-card rounded-2xl p-5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${c.glow} ${className}`}
+      className={`glass-card rounded-2xl p-5 h-full transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${c.glow} ${className}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 truncate">
             {title}
           </p>
-          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">{value}</p>
+          <p className="mt-2 text-2xl font-bold text-slate-900 dark:text-white tabular-nums">
+            {displayValue}
+          </p>
           {trend && (
             <div className="mt-1.5 flex items-center gap-1">
               <TrendIcon className={`w-3.5 h-3.5 ${trendColor}`} />
@@ -52,7 +59,7 @@ export default function StatCard({ title, value, icon: Icon, trend, trendValue, 
           )}
         </div>
         {Icon && (
-          <div className={`p-2.5 rounded-xl shrink-0 ${c.icon}`}>
+          <div className={`p-2.5 rounded-xl shrink-0 transition-transform duration-300 hover:scale-105 ${c.icon}`}>
             <Icon className="w-5 h-5" />
           </div>
         )}

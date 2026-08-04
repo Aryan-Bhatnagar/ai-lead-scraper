@@ -9,6 +9,7 @@ from ..services.peopleperhour_scraper_service import PeoplePerHourScraperService
 from .base_provider import BaseOpportunityProvider
 from .opportunity_models import Opportunity
 
+
 class PeoplePerHourProvider(BaseOpportunityProvider):
     """PeoplePerHour opportunity provider."""
 
@@ -121,6 +122,7 @@ class PeoplePerHourProvider(BaseOpportunityProvider):
             # Build URL
             url = job_data.get('url', f"https://www.peopleperhour.com/work/{opp_id}")
 
+            provider_metadata = {**job_data.get('provider_metadata', {}), 'budget_min': float(budget_min), 'budget_max': float(budget_max)}
             return Opportunity(
                 id=opp_id,
                 provider="peopleperhour",
@@ -138,7 +140,7 @@ class PeoplePerHourProvider(BaseOpportunityProvider):
                 proposal_count=int(proposal_count),
                 estimated_value=float(estimated_value),
                 url=url,
-                provider_metadata=job_data.get('provider_metadata', {}),
+                provider_metadata=provider_metadata,
                 created_at=datetime.now()
             )
         except Exception as e:

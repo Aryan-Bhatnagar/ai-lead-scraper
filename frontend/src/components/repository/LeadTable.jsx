@@ -149,10 +149,10 @@ export default function LeadTable({
                     <tr
                       key={lead.id}
                       onClick={() => onView?.(lead)}
-                      className={`group cursor-pointer transition-colors ${
+                      className={`group cursor-pointer transition-colors duration-150 ${
                         isSelected
-                          ? 'bg-primary-50/60 dark:bg-primary-500/10'
-                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          ? 'bg-primary-50/70 dark:bg-primary-500/10 hover:bg-primary-50 dark:hover:bg-primary-500/15'
+                          : 'hover:bg-primary-50/40 dark:hover:bg-slate-800/60'
                       }`}
                     >
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -166,11 +166,11 @@ export default function LeadTable({
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5 max-w-[230px]">
-                          <div className="w-8 h-8 rounded-lg bg-primary-50 dark:bg-primary-500/10 flex items-center justify-center text-primary-600 dark:text-primary-400 shrink-0">
+                          <div className="w-8 h-8 rounded-lg bg-primary-50 dark:bg-primary-500/10 flex items-center justify-center text-primary-600 dark:text-primary-400 shrink-0 transition-transform duration-200 group-hover:scale-105">
                             <Building2 className="w-4 h-4" />
                           </div>
                           <div className="min-w-0">
-                            <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate">
+                            <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors">
                               {lead.company_name}
                             </p>
                             {lead.industry && (
@@ -185,7 +185,7 @@ export default function LeadTable({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="text-primary-600 dark:text-primary-400 hover:underline truncate block"
+                          className="text-primary-600 dark:text-primary-400 hover:underline underline-offset-2 truncate block"
                         >
                           {domain}
                         </a>
@@ -213,8 +213,9 @@ export default function LeadTable({
                             e.stopPropagation()
                             onView?.(lead)
                           }}
-                          className="p-1.5 text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1.5 text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-100/80 dark:hover:bg-primary-500/15 rounded-lg transition-all duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100 active:scale-95"
                           title="View details"
+                          aria-label={`View ${lead.company_name}`}
                         >
                           <Eye className="w-4 h-4" />
                         </button>

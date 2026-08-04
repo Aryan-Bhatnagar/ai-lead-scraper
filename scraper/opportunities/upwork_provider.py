@@ -186,7 +186,9 @@ class UpworkProvider(BaseOpportunityProvider):
                     "job_type": job_data.get('job_type', job_data.get('contract_type', 'unknown')),
                     "experience_level": experience_level,
                     "duration": job_data.get('duration', job_data.get('contract_length', 'unknown')),
-                    "payment_verified": job_data.get('payment_verified', job_data.get('client_payment_verified', False))
+                    "payment_verified": job_data.get('payment_verified', job_data.get('client_payment_verified', False)),
+                    "budget_min": float(budget_min),
+                    "budget_max": float(budget_max)
                 },
                 created_at=datetime.now()
             )

@@ -139,7 +139,11 @@ class GuruProvider(BaseOpportunityProvider):
                 proposal_count=int(proposal_count),
                 estimated_value=float(estimated_value),
                 url=url,
-                provider_metadata=job_data.get('provider_metadata', {}),
+                provider_metadata={
+                    **job_data.get('provider_metadata', {}),
+                    'budget_min': float(budget_min),
+                    'budget_max': float(budget_max)
+                },
                 created_at=datetime.now()
             )
         except Exception as e:

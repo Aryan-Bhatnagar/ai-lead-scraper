@@ -1,11 +1,20 @@
-import { Search, Bell, Moon, Sun, User } from 'lucide-react'
+import { Search, Bell, Moon, Sun, User, Menu } from 'lucide-react'
 import useDarkMode from '../../hooks/useDarkMode'
 
-export default function Navbar() {
+export default function Navbar({ onMenuClick = () => {} }) {
   const { isDark, toggle } = useDarkMode()
 
   return (
-    <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700/60 flex items-center justify-between px-6 shrink-0 sticky top-0 z-30">
+    <header className="h-16 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700/60 flex items-center justify-between gap-3 px-4 sm:px-6 shrink-0 sticky top-0 z-30">
+      {/* Mobile menu toggle */}
+      <button
+        onClick={onMenuClick}
+        className="p-2 -ml-1 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300 transition-colors lg:hidden"
+        aria-label="Open navigation"
+      >
+        <Menu className="w-5 h-5" />
+      </button>
+
       {/* Search */}
       <div className="flex-1 max-w-md">
         <div className="relative">
@@ -19,7 +28,7 @@ export default function Navbar() {
       </div>
 
       {/* Right section */}
-      <div className="flex items-center gap-2 ml-4">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         {/* Theme toggle */}
         <button
           onClick={toggle}
@@ -30,13 +39,16 @@ export default function Navbar() {
         </button>
 
         {/* Notifications */}
-        <button className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300 transition-colors relative">
+        <button
+          className="p-2 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300 transition-colors relative"
+          aria-label="Notifications"
+        >
           <Bell className="w-5 h-5" />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger-500 rounded-full" />
         </button>
 
         {/* Divider */}
-        <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 mx-2" />
+        <div className="hidden sm:block w-px h-8 bg-slate-200 dark:bg-slate-700 mx-1 sm:mx-2" />
 
         {/* User */}
         <button className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">

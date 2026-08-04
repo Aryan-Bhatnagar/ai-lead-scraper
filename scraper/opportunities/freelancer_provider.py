@@ -140,7 +140,14 @@ class FreelancerProvider(BaseOpportunityProvider):
                 proposal_count=int(proposal_count),
                 estimated_value=float(estimated_value),
                 url=url,
-                provider_metadata=job_data.get('provider_metadata', {}),
+                provider_metadata={
+                    "job_type": job_data.get('job_type', job_data.get('contract_type', 'unknown')),
+                    "experience_level": experience_level,
+                    "duration_days": job_data.get('duration_days', 0),
+                    "verified_payment": job_data.get('verified_payment', False),
+                    "budget_min": float(budget_min),
+                    "budget_max": float(budget_max)
+                },
                 created_at=datetime.now()
             )
         except Exception as e:

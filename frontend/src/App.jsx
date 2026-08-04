@@ -15,13 +15,28 @@ export default function App() {
     <BrowserRouter>
       <Toaster
         position="top-right"
+        gutter={10}
         toastOptions={{
           duration: 4000,
           style: {
-            borderRadius: '10px',
-            background: '#1e293b',
+            borderRadius: '12px',
+            background: '#0f172a',
             color: '#f8fafc',
-            fontSize: '14px',
+            fontSize: '13px',
+            padding: '10px 14px',
+            boxShadow: '0 10px 30px rgba(2,6,23,0.35)',
+            border: '1px solid rgba(148,163,184,0.15)',
+            maxWidth: 'min(420px, calc(100vw - 24px))',
+          },
+          success: {
+            iconTheme: { primary: '#22c55e', secondary: '#0f172a' },
+          },
+          error: {
+            duration: 5000,
+            iconTheme: { primary: '#f43f5e', secondary: '#0f172a' },
+          },
+          loading: {
+            iconTheme: { primary: '#6366f1', secondary: '#0f172a' },
           },
         }}
       />

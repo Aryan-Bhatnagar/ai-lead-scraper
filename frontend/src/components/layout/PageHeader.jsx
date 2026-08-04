@@ -1,13 +1,15 @@
 export default function PageHeader({ title, subtitle, children }) {
   return (
-    <div className="flex items-start justify-between mb-8">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">{title}</h1>
+    <div className="flex flex-wrap items-start justify-between gap-4 mb-6 sm:mb-8">
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+          {title}
+        </h1>
         {subtitle && (
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-2xl">{subtitle}</p>
         )}
       </div>
-      {children && <div className="flex items-center gap-3">{children}</div>}
+      {children && <div className="flex items-center gap-3 shrink-0">{children}</div>}
     </div>
   )
 }
