@@ -21,11 +21,15 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
 from .engine import DiscoveryRunSummary, LeadDiscoveryEngine
 from .provider import DiscoveryProvider
 from .query import DiscoveryBatch, DiscoveryQuery, SourceMeta
 from .registry import ProviderRegistry, default_registry
+
+# Legacy persistence adapter
+from ..persistence.legacy_adapter import LegacyLeadPersistenceAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,7 @@ DEFAULT_PROVIDER_ORDER: List[str] = [
     "google_search",
     "website_discovery",
     "google_maps",
+    "google_maps_scraper_kit",
     "upwork",
 ]
 
@@ -78,6 +83,8 @@ class DiscoveryOrchestrator:
         max_workers: int = 8,
         engine: Optional[LeadDiscoveryEngine] = None,
         repository: Optional[object] = None,  # We'll accept any object that has persist_orchestrator_summary or bulk_insert
+        legacy_persistence: bool = False,
+        legacy_db_path: str | Path = "data/leads.db",
     ) -> None:
         self.registry = registry
         self.provider_order: List[str] = (
@@ -91,6 +98,10 @@ class DiscoveryOrchestrator:
             registry=registry, max_workers=max_workers
         )
         self.repository = repository
+        self.legacy_persistence = legacy_persistence
+        self.legacy_db_path = Path(legacy_db_path)
+        if self.legacy_persistence:
+            self._legacy_adapter = LegacyLeadPersistenceAdapter(db_path=self.legacy_db_path)
 
     # ------------------------------------------------------------------
     # Public API
@@ -138,8 +149,8 @@ class DiscoveryOrchestrator:
             batches = self._execute_with_retries(active, query)
             summary = self._aggregate(query, batches, active)
 
-        # Persist results if a repository is configured
-        if self.repository is not None:
+        # Persist results if a repository is configured or legacy persistence is enabled
+        if self.repository is not None or self.legacy_persistence:
             self.persist_results(summary)
 
         return summary
@@ -159,9 +170,14 @@ class DiscoveryOrchestrator:
         if hasattr(summary, 'scored_leads'):
             leads = getattr(summary, 'scored_leads', [])
             if leads:
-                # The repository's bulk_insert expects an iterable of UnifiedLead or ScoredLead.
-                # We have ScoredLead objects, so we can pass them directly.
-                self.repository.bulk_insert(leads)
+                # Persist via the configured repository (if any)
+                if self.repository is not None:
+                    # The repository's bulk_insert expects an iterable of UnifiedLead or ScoredLead.
+                    # We have ScoredLead objects, so we can pass them directly.
+                    self.repository.bulk_insert(leads)
+                # Additionally, persist to legacy storage if enabled
+                if self.legacy_persistence:
+                    self._legacy_adapter.bulk_insert(leads)
 
     def set_provider_enabled(self, name: str, enabled: bool) -> None:
         """Enable or disable a provider by name."""

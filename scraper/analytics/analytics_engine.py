@@ -21,6 +21,28 @@ from .analytics_models import (
 import scraper.database as db
 
 
+def _opportunity_high_threshold() -> int:
+    """Return the 'high' band for opportunity scores from lead_scoring.yaml.
+
+    The score model's high band is unreachable if analytics hardcodes a value
+    that doesn't match the config — keep the two in sync here.
+    """
+    import yaml
+    from pathlib import Path
+    for candidate in (
+        Path.cwd() / "config" / "lead_scoring.yaml",
+        Path(__file__).resolve().parent.parent.parent / "config" / "lead_scoring.yaml",
+    ):
+        if candidate.exists():
+            try:
+                with open(candidate, "r", encoding="utf-8") as fh:
+                    cfg = yaml.safe_load(fh) or {}
+                return int(cfg.get("opportunity_thresholds", {}).get("high", 80))
+            except Exception:
+                pass
+    return 80
+
+
 class AnalyticsEngine:
     """Core analytics engine for computing metrics from the lead database."""
 
@@ -42,12 +64,36 @@ class AnalyticsEngine:
             )
             total_companies = cursor.fetchone()[0]
 
-            # Average, median, min, max scores
-            # Note: We'll compute median in Python for simplicity, but note that for large datasets this might be inefficient.
+            # AI-scored leads (have a real opportunity score from the AI
+            # enrichment pipeline).  CAST guards against text values (some
+            # legacy rows stored '' — and '' > 0 is true for TEXT in SQLite).
             cursor.execute(
-                "SELECT quality_score FROM leads WHERE quality_score IS NOT NULL"
+                "SELECT COUNT(*) FROM leads WHERE CAST(opportunity_score AS INTEGER) > 0"
+            )
+            ai_scored_leads = cursor.fetchone()[0]
+
+            # High-quality leads (AI opportunity score in the high band, or an
+            # excellent/good quality tier from the scoring engine)
+            high_threshold = _opportunity_high_threshold()
+            cursor.execute(
+                f"SELECT COUNT(*) FROM leads WHERE CAST(opportunity_score AS INTEGER) >= {high_threshold} "
+                "OR LOWER(COALESCE(quality_tier, '')) IN ('excellent', 'good')"
+            )
+            high_quality_leads = cursor.fetchone()[0]
+
+            # Average, median, min, max of the AI opportunity score — this is the
+            # headline "AI Score" surfaced across the CRM.  Fall back to
+            # quality_score only when no opportunity scores exist yet.
+            cursor.execute(
+                "SELECT CAST(opportunity_score AS INTEGER) FROM leads "
+                "WHERE CAST(opportunity_score AS INTEGER) > 0"
             )
             scores = [row[0] for row in cursor.fetchall()]
+            if not scores:
+                cursor.execute(
+                    "SELECT quality_score FROM leads WHERE quality_score IS NOT NULL"
+                )
+                scores = [row[0] for row in cursor.fetchall()]
             if scores:
                 average_score = sum(scores) / len(scores)
                 sorted_scores = sorted(scores)
@@ -64,24 +110,46 @@ class AnalyticsEngine:
                 highest_score = 0
                 lowest_score = 0
 
-            # Lead sources (extract domain from source_url)
-            cursor.execute("SELECT source_url FROM leads WHERE source_url IS NOT NULL AND source_url != ''")
-            sources = [row[0] for row in cursor.fetchall()]
+            # Lead sources — prefer the normalized `source` column (Apollo,
+            # Upwork, Google Maps…) and fall back to the source_url domain for
+            # legacy rows that predate the column.
+            cursor.execute(
+                "SELECT source, source_url FROM leads WHERE source IS NOT NULL AND source != '' "
+                "OR source_url IS NOT NULL AND source_url != ''"
+            )
+            rows = cursor.fetchall()
             lead_sources = {}
-            for url in sources:
-                try:
-                    # Extract domain from URL
-                    if url.startswith('http://'):
-                        url = url[7:]
-                    elif url.startswith('https://'):
-                        url = url[8:]
-                    # Take until first slash or end
-                    domain = url.split('/')[0]
-                    if not domain:
-                        domain = 'unknown'
-                except Exception:
-                    domain = 'unknown'
-                lead_sources[domain] = lead_sources.get(domain, 0) + 1
+            for src, url in rows:
+                name = src
+                if not name:
+                    try:
+                        if url.startswith('http://'):
+                            url = url[7:]
+                        elif url.startswith('https://'):
+                            url = url[8:]
+                        name = url.split('/')[0]
+                    except Exception:
+                        name = 'unknown'
+                    if not name:
+                        name = 'unknown'
+                # Map raw provider keys to friendly names
+                friendly = {
+                    "google_maps": "Google Maps",
+                    "google_maps_scraper_kit": "Google Maps Kit",
+                    "google_search": "Google Search",
+                    "website_discovery": "Website Discovery",
+                    "apollo": "Apollo",
+                    "apify": "Apify",
+                    "upwork": "Upwork",
+                    "freelancer": "Freelancer",
+                    "guru": "Guru",
+                    "peopleperhour": "PeoplePerHour",
+                    "zoominfo": "ZoomInfo",
+                    "lusha": "Lusha",
+                    "linkedin": "LinkedIn",
+                }
+                name = friendly.get(name.lower(), name)
+                lead_sources[name] = lead_sources.get(name, 0) + 1
 
             # Countries
             cursor.execute("SELECT country FROM leads WHERE country IS NOT NULL AND country != ''")
@@ -121,6 +189,8 @@ class AnalyticsEngine:
         return OverviewStats(
             total_leads=total_leads,
             total_companies=total_companies,
+            ai_scored_leads=ai_scored_leads,
+            high_quality_leads=high_quality_leads,
             average_score=round(average_score, 2),
             median_score=round(median_score, 2),
             highest_score=highest_score,
@@ -137,21 +207,36 @@ class AnalyticsEngine:
         """Compute quality analytics based on score thresholds."""
         with db.get_connection(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT quality_score FROM leads")
-            scores = [row[0] for row in cursor.fetchall()]
+            cursor.execute("SELECT quality_score, quality_tier FROM leads")
+            rows = cursor.fetchall()
 
         excellent = good = average = poor = unknown = 0
-        for score in scores:
-            if score is None:
+        for score, tier in rows:
+            if score is None or score == 0:
                 unknown += 1
-            elif score >= 85:
-                excellent += 1
-            elif score >= 66:
-                good += 1
-            elif score >= 50:
-                average += 1
+            elif tier:
+                # Use the quality_tier field which is already computed by the scoring engine
+                tier_lower = tier.lower()
+                if tier_lower == "excellent":
+                    excellent += 1
+                elif tier_lower == "good":
+                    good += 1
+                elif tier_lower == "average":
+                    average += 1
+                elif tier_lower == "poor":
+                    poor += 1
+                else:
+                    unknown += 1
             else:
-                poor += 1
+                # Fallback to score-based thresholds if tier is not available
+                if score >= 90:
+                    excellent += 1
+                elif score >= 75:
+                    good += 1
+                elif score >= 50:
+                    average += 1
+                else:
+                    poor += 1
 
         return QualityAnalytics(
             excellent=excellent,
@@ -162,30 +247,51 @@ class AnalyticsEngine:
         )
 
     def get_provider_analytics(self) -> List[ProviderAnalytics]:
-        """Compute analytics per discovery provider (based on source_url domain)."""
-        # We'll get the source_url and also the data_quality to compute success/failure rates.
+        """Compute analytics per discovery provider (based on the source column)."""
+        # Prefer the normalized `source` column; fall back to source_url domain
+        # for legacy rows. The data_quality drives success/failure rates.
         with db.get_connection(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT source_url, data_quality
+                SELECT source, source_url, data_quality
                 FROM leads
-                WHERE source_url IS NOT NULL AND source_url != ''
+                WHERE (source IS NOT NULL AND source != '')
+                   OR (source_url IS NOT NULL AND source_url != '')
             """)
             rows = cursor.fetchall()
 
-        # Group by domain (provider)
+        friendly = {
+            "google_maps": "Google Maps",
+            "google_maps_scraper_kit": "Google Maps Kit",
+            "google_search": "Google Search",
+            "website_discovery": "Website Discovery",
+            "apollo": "Apollo",
+            "apify": "Apify",
+            "upwork": "Upwork",
+            "freelancer": "Freelancer",
+            "guru": "Guru",
+            "peopleperhour": "PeoplePerHour",
+            "zoominfo": "ZoomInfo",
+            "lusha": "Lusha",
+            "linkedin": "LinkedIn",
+        }
+
+        # Group by provider (source name)
         provider_data = {}
-        for url, quality in rows:
-            try:
-                if url.startswith('http://'):
-                    url = url[7:]
-                elif url.startswith('https://'):
-                    url = url[8:]
-                domain = url.split('/')[0]
+        for src, url, quality in rows:
+            domain = src
+            if not domain:
+                try:
+                    if url.startswith('http://'):
+                        url = url[7:]
+                    elif url.startswith('https://'):
+                        url = url[8:]
+                    domain = url.split('/')[0]
+                except Exception:
+                    domain = 'unknown'
                 if not domain:
                     domain = 'unknown'
-            except Exception:
-                domain = 'unknown'
+            domain = friendly.get(domain.lower(), domain)
 
             if domain not in provider_data:
                 provider_data[domain] = {

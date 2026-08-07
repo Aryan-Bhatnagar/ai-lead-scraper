@@ -56,6 +56,29 @@ LEAD_COLUMNS = [
     "quality_score",
     "data_quality",
     "error",
+    # New enriched fields
+    "quality_tier",
+    "score_breakdown_json",
+    "google_rating",
+    "maps_review_count",
+    "categories",
+    "socials_json",
+    # Phase 1: Unified Lead Model fields
+    "address",
+    "source",
+    "discovery_date",
+    "ai_score",
+    "ai_summary",
+    "recommended_service",
+    "pain_points",
+    "company_size_estimate",
+    "decision_maker_guess",
+    "buying_signals",
+    "outreach_strategy",
+    "ai_confidence",
+    "opportunity_score",
+    "score_explanation_json",
+    "company_logo",
 ]
 
 # CRM lead lifecyle statuses – independent of the scraper ``status`` field.
@@ -94,7 +117,14 @@ CREATE TABLE IF NOT EXISTS leads (
     error TEXT,
     lead_status TEXT NOT NULL DEFAULT 'NEW',
     created_at TEXT,
-    updated_at TEXT
+    updated_at TEXT,
+    -- New enriched fields for scoring and quality
+    quality_tier TEXT,
+    score_breakdown_json TEXT,
+    google_rating REAL,
+    maps_review_count INTEGER,
+    categories TEXT,
+    socials_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS scrape_jobs (
@@ -255,6 +285,43 @@ def initialize_database(db_path: Path | str = DB_PATH) -> None:
             conn.execute(
                 "ALTER TABLE leads ADD COLUMN lead_status TEXT NOT NULL DEFAULT 'NEW'"
             )
+
+        # Phase 1: Add Unified Lead Model columns if they don't exist
+        phase1_columns = [
+            ("address", "TEXT"),
+            ("source", "TEXT"),
+            ("discovery_date", "TEXT"),
+            ("ai_score", "INTEGER"),
+            ("ai_summary", "TEXT"),
+            ("recommended_service", "TEXT"),
+            ("pain_points", "TEXT"),
+            ("company_size_estimate", "TEXT"),
+            ("decision_maker_guess", "TEXT"),
+            ("buying_signals", "TEXT"),
+            ("outreach_strategy", "TEXT"),
+            ("ai_confidence", "REAL"),
+            ("opportunity_score", "INTEGER"),
+            ("score_explanation_json", "TEXT"),
+            ("company_logo", "TEXT"),
+        ]
+        for col_name, col_type in phase1_columns:
+            if col_name not in cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_type}")
+
+        # Refresh columns set after migrations
+        cur = conn.execute("PRAGMA table_info(leads)")
+        cols = {row["name"] for row in cur.fetchall()}
+
+        # Phase 1: Create new indexes for Unified Lead Model
+        phase1_indexes = [
+            ("idx_leads_source", "source"),
+            ("idx_leads_ai_score", "ai_score"),
+            ("idx_leads_opportunity_score", "opportunity_score"),
+            ("idx_leads_discovery_date", "discovery_date"),
+        ]
+        for idx_name, col_name in phase1_indexes:
+            if col_name in cols:
+                conn.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON leads({col_name})")
 
 
 # ---------------------------------------------------------------------------

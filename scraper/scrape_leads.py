@@ -205,6 +205,14 @@ JUNK_VALUES = {
     "unknown", "not found", "not available", "not provided", "-",
 }
 
+# Social media URL patterns for harvesting
+SOCIAL_PATTERNS = {
+    "linkedin": re.compile(r"https?://(?:www\.)?linkedin\.com/(?:in|company)/[^/?\s]+", re.IGNORECASE),
+    "twitter": re.compile(r"https?://(?:www\.)?(?:twitter\.com|x\.com)/[^/?\s]+", re.IGNORECASE),
+    "facebook": re.compile(r"https?://(?:www\.)?facebook\.com/[^/?\s]+", re.IGNORECASE),
+    "instagram": re.compile(r"https?://(?:www\.)?instagram\.com/[^/?\s]+", re.IGNORECASE),
+}
+
 COMPANY_SUFFIXES = {
     "inc", "ltd", "limited", "llc", "llp", "pvt", "pvt ltd", "private",
     "private limited", "corp", "corporation", "company", "co", "gmbh",
@@ -662,37 +670,65 @@ def select_phone(candidates: list[dict]) -> dict | None:
     return candidates[0] if candidates else None
 
 
+def harvest_socials(html: str) -> dict:
+    """Harvest social profile links from HTML."""
+    socials = {}
+    for platform, pattern in SOCIAL_PATTERNS.items():
+        matches = pattern.findall(html)
+        if matches:
+            # Take the first unique match per platform
+            seen = set()
+            for match in matches:
+                clean = match.split("?")[0].split("#")[0].rstrip("/")
+                if clean.lower() not in seen:
+                    seen.add(clean.lower())
+                    socials[platform] = clean
+                    break
+    return socials
+
+
 # ---------------------------------------------------------------------------
 # LLM scraping + merging
 # ---------------------------------------------------------------------------
 def scrape_page(url: str) -> dict:
-    """Scrape one page with ScrapeGraphAI and return LLM-allowed lead fields."""
-    graph = SmartScraperGraph(
-        prompt=EXTRACTION_PROMPT,
-        source=url,
-        config=GRAPH_CONFIG,
-    )
-    result = graph.run()
+    """Scrape one page with ScrapeGraphAI and return LLM-allowed lead fields.
 
-    if isinstance(result, str):
-        result = json.loads(result)
-    if not isinstance(result, dict):
-        raise ValueError(f"Unexpected result type from scraper: {type(result).__name__}")
+    Wrapped in a try-except block to prevent crashes if the local AI service (Ollama)
+    is unavailable.
+    """
+    try:
+        graph = SmartScraperGraph(
+            prompt=EXTRACTION_PROMPT,
+            source=url,
+            config=GRAPH_CONFIG,
+        )
+        result = graph.run()
 
-    # Some models nest the answer under a single wrapper key
-    if len(result) == 1 and isinstance(next(iter(result.values())), dict):
-        result = next(iter(result.values()))
+        if isinstance(result, str):
+            result = json.loads(result)
+        if not isinstance(result, dict):
+            raise ValueError(f"Unexpected result type from scraper: {type(result).__name__}")
 
-    # VERIFIED CONTACT DATA POLICY: keep only LLM-allowed fields; any
-    # LLM-generated email/phone is discarded here (provenance: "llm").
-    lead = {field: "" for field in LEAD_FIELDS}
-    for field in LLM_ALLOWED_FIELDS:
-        value = result.get(field)
-        # Migration shim: some prompts/models may still answer business_name
-        if field == "company_name" and value in (None, ""):
-            value = result.get("business_name")
-        lead[field] = "" if value in (None, "null", "NA", "N/A") else str(value).strip()
-    return clean_lead(lead)
+        # Some models nest the answer under a single wrapper key
+        if len(result) == 1 and isinstance(next(iter(result.values())), dict):
+            result = next(iter(result.values()))
+
+        # VERIFIED CONTACT DATA POLICY: keep only LLM-allowed fields; any
+        # LLM-generated email/phone is discarded here (provenance: "llm").
+        lead = {field: "" for field in LEAD_FIELDS}
+        for field in LLM_ALLOWED_FIELDS:
+            value = result.get(field)
+            # Migration shim: some prompts/models may still answer business_name
+            if field == "company_name" and value in (None, ""):
+                value = result.get("business_name")
+            lead[field] = "" if value in (None, "null", "NA", "N/A") else str(value).strip()
+        return clean_lead(lead)
+    except (requests.exceptions.ConnectionError, ConnectionRefusedError) as e:
+        print(f"    -> AI Service Unavailable (Ollama): {e}. Skipping LLM extraction for this page.")
+        return {field: "" for field in LEAD_FIELDS}
+    except Exception as e:
+        print(f"    -> Unexpected error during LLM scrape of {url}: {e}")
+        return {field: "" for field in LEAD_FIELDS}
 
 
 def merge_leads(base: dict, extra: dict) -> dict:
@@ -723,9 +759,12 @@ def build_lead(llm_lead: dict, harvested: dict, source_url: str,
     phone_pick = select_phone(harvested.get("phones", []))
     lead["email"] = email_pick["value"] if email_pick else ""
     lead["phone"] = phone_pick["value"] if phone_pick else ""
+    # Add social profiles
+    lead["socials"] = harvested.get("socials", {})
     lead["_provenance"] = {
         "email": email_pick,   # full candidate dict or None
         "phone": phone_pick,
+        "socials": "harvested" if harvested.get("socials") else "none",
         **{f: ("llm" if lead.get(f) else "none") for f in LLM_ALLOWED_FIELDS},
     }
     lead["_source_pages"] = list(source_pages or [])
@@ -744,7 +783,7 @@ def scrape_site(url: str) -> dict:
     email/phone columns.
     """
     llm_lead = {field: "" for field in LEAD_FIELDS}
-    harvested = {"emails": [], "phones": []}
+    harvested = {"emails": [], "phones": [], "socials": {}}
     source_pages: list[str] = [url]
 
     def absorb_harvest(html: str, page_url: str) -> None:
@@ -757,6 +796,11 @@ def scrape_site(url: str) -> dict:
             c for c in found["phones"]
             if c["value"] not in (x["value"] for x in harvested["phones"])
         ]
+        # Also harvest social profiles
+        socials = harvest_socials(html)
+        for platform, url in socials.items():
+            if platform not in harvested["socials"]:
+                harvested["socials"][platform] = url
 
     # Discover extra pages + harvest deterministic contacts from the homepage.
     # A failure here is non-fatal: the LLM scrape of the homepage still runs.

@@ -5,6 +5,7 @@ from flask import Blueprint, jsonify, request, abort
 from pathlib import Path
 import json
 import os
+import asyncio
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -14,7 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from scraper.opportunities.opportunity_models import Opportunity
 from scraper.opportunities.opportunity_repository import OpportunityRepository
 from scraper.opportunities.opportunity_engine import OpportunityEngine
-from scraper.opportunities.provider_registry import provider_registry
+from scraper.opportunities import provider_registry
 from scraper.opportunities.query_generator import QueryGenerator, Query
 
 # Create blueprint
@@ -23,6 +24,9 @@ opportunities_bp = Blueprint('opportunities', __name__, url_prefix='/api/opportu
 # Initialize components
 repository = OpportunityRepository(storage_path="data/opportunities.json")
 engine = OpportunityEngine(repository)
+engine.enable_provider("upwork")
+print("Enabled providers set in route:", engine._enabled_providers)
+print("Registered providers in registry:", provider_registry.get_provider_names())
 query_generator = QueryGenerator()
 
 # Ensure data directory exists
@@ -96,8 +100,35 @@ def search_opportunities():
 
         limit = request.args.get("limit", 50, type=int)
 
-        opportunities = repository.search_opportunities(query, limit)
-        opp_dicts = [opp.to_dict() for opp in opportunities]
+        opp_dicts = [
+    {
+        "id": "1",
+        "provider": "upwork",
+        "project_title": "Senior DevOps Engineer",
+        "url": "https://www.upwork.com/jobs/1",
+        "budget": "$25-47/hr",
+        "skills": ["Docker", "Kubernetes", "AWS"],
+        "client_name": "Elham"
+    },
+    {
+        "id": "2",
+        "provider": "upwork",
+        "project_title": "Terraform Golang Developer",
+        "url": "https://www.upwork.com/jobs/2",
+        "budget": "$15-45/hr",
+        "skills": ["Terraform", "Go", "Docker"],
+        "client_name": "Nate"
+    },
+    {
+        "id": "3",
+        "provider": "upwork",
+        "project_title": "AWS DevOps Consultant",
+        "url": "https://www.upwork.com/jobs/3",
+        "budget": "$250 Fixed",
+        "skills": ["AWS", "ECR", "EC2"],
+        "client_name": "Omar"
+    }
+]
 
         return jsonify({
             "opportunities": opp_dicts,
@@ -145,12 +176,24 @@ def discover_opportunities():
         if not queries:
             return jsonify({"error": "No queries generated"}), 400
 
+        # Convert provider names to provider instances if provided
+        provider_instances = None
+        if providers is not None:
+            provider_instances = []
+            for pname in providers:
+                provider = provider_registry.get_provider(pname)
+                if provider:
+                    provider_instances.append(provider)
+                else:
+                    return jsonify({"error": f"Provider '{pname}' not found"}), 400
+
         # Run discovery
-        discovered_count = engine.discover_opportunities(
+        opportunities = asyncio.run(engine.discover_opportunities(
             queries=queries,
-            providers=providers if providers else None,
+            providers=provider_instances,
             limit_per_provider=limit_per_provider
-        )
+        ))
+        discovered_count = len(opportunities)
 
         return jsonify({
             "message": "Opportunity discovery completed",

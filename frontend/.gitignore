@@ -2,3 +2,13 @@ node_modules/
 dist/
 .env
 .kilo/
+venv/
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+*.csv
+*.log
+.env.local
+frontend/node_modules/
+gmapsdata/

@@ -56,8 +56,8 @@ def _apply_filters(
         clauses.append("data_quality = ?")
         params.append(filters["quality_tier"])
     if filters.get("source"):
-        clauses.append("source_url LIKE ?")
-        params.append(f"%{filters['source']}%")
+        clauses.append("(source = ? OR source_url LIKE ?)")
+        params.extend([filters["source"], f"%{filters['source']}%"])
     if filters.get("status"):
         clauses.append("status = ?")
         params.append(filters["status"])
@@ -84,6 +84,15 @@ def _apply_sorting(
     valid_fields = {
         "id": "id",
         "company_name": "company_name",
+        "contact_name": "contact_name",
+        "email": "email",
+        "phone": "phone",
+        "website": "website",
+        "country": "country",
+        "city": "city",
+        "company_size_estimate": "company_size_estimate",
+        "source": "source",
+        "opportunity_score": "opportunity_score",
         "quality_score": "quality_score",
         "data_quality": "data_quality",
         "lead_status": "lead_status",
@@ -91,9 +100,6 @@ def _apply_sorting(
         "scraped_at": "scraped_at",
         "created_at": "created_at",
         "updated_at": "updated_at",
-        "website": "website",
-        "country": "country",
-        "city": "city",
     }
     if sort_by and sort_by in valid_fields:
         direction = "DESC" if sort_desc else "ASC"

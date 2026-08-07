@@ -30,6 +30,14 @@ class OpportunityEngine:
 
     def get_enabled_providers(self) -> List[BaseOpportunityProvider]:
         """Get list of enabled provider instances."""
+        # Debug prints
+        print("Enabled providers:", self._enabled_providers)
+        print("Registered providers:", self.provider_registry.get_provider_names())
+        """Get list of enabled provider instances."""
+        # Debug prints
+        print("Enabled providers:", self._enabled_providers)
+        print("Registered providers:", self.provider_registry.get_provider_names())
+        """Get list of enabled provider instances."""
         providers = []
         for name in self._enabled_providers:
             provider = self.provider_registry.get_provider(name)
@@ -43,7 +51,10 @@ class OpportunityEngine:
                                    categories: Optional[List[str]] = None,
                                    custom_keywords: Optional[List[str]] = None,
                                    max_queries_per_category: int = 3,
-                                   max_opportunities_per_query: int = 50) -> List[Opportunity]:
+                                   max_opportunities_per_query: int = 50,
+                                   queries: Optional[List[Query]] = None,
+                                   providers: Optional[List[BaseOpportunityProvider]] = None,
+                                   limit_per_provider: Optional[int] = None) -> List[Opportunity]:
         """
         Discover opportunities from enabled providers.
 
@@ -52,48 +63,66 @@ class OpportunityEngine:
             custom_keywords: Additional keywords to include in queries.
             max_queries_per_category: Maximum number of queries to generate per category.
             max_opportunities_per_query: Maximum opportunities to fetch per query per provider.
+            queries: Pre-generated list of Query objects. If provided, categories/custom_keywords/max_queries_per_category are ignored.
+            providers: List of provider instances to use. If None, use all enabled providers.
+            limit_per_provider: Override max_opportunities_per_query for this call.
 
         Returns:
             List of discovered opportunities.
         """
-        # Generate queries
-        queries = self.query_generator.generate_queries(
-            categories=categories,
-            custom_keywords=custom_keywords,
-            max_queries_per_category=max_queries_per_category
-        )
-        logger.info(f"Generated {len(queries)} search queries")
+        # Use provided queries or generate them
+        if queries is not None:
+            query_list = queries
+        else:
+            query_list = self.query_generator.generate_queries(
+                categories=categories,
+                custom_keywords=custom_keywords,
+                max_queries_per_category=max_queries_per_category
+            )
+        logger.info(f"Generated {len(query_list)} search queries")
+        print(f"[ENGINE] Generated {len(query_list)} search queries: {[q.to_search_string() for q in query_list[:3]]}")
 
-        # Get enabled providers
-        providers = self.get_enabled_providers()
-        if not providers:
+        # Determine providers to use
+        if providers is not None:
+            provider_list = providers
+        else:
+            provider_list = self.get_enabled_providers()
+        if not provider_list:
             logger.warning("No providers enabled for opportunity discovery")
             return []
 
-        logger.info(f"Discovering opportunities using {len(providers)} providers: {[p.name for p in providers]}")
+        logger.info(f"Discovering opportunities using {len(provider_list)} providers: {[p.name for p in provider_list]}")
+        print(f"[ENGINE] Providers: {[p.name for p in provider_list]}")
+
+        # Determine limit per provider
+        limit = limit_per_provider if limit_per_provider is not None else max_opportunities_per_query
 
         # Discover opportunities from each provider
         all_opportunities = []
-        for provider in providers:
+        for provider in provider_list:
             try:
                 provider_opportunities = await self._discover_from_provider(
-                    provider, queries, max_opportunities_per_query
+                    provider, query_list, limit
                 )
+                print(f"[ENGINE] Provider {provider.name} returned {len(provider_opportunities)} raw opportunities")
                 all_opportunities.extend(provider_opportunities)
                 logger.info(f"Provider {provider.name} yielded {len(provider_opportunities)} opportunities")
             except Exception as e:
                 logger.error(f"Error discovering opportunities from provider {provider.name}: {e}")
+                print(f"[ENGINE] Error from provider {provider.name}: {e}")
 
         # Deduplicate opportunities
         unique_opportunities = self._deduplicate_opportunities(all_opportunities)
+        print(f"[ENGINE] After deduplication: {len(unique_opportunities)} unique opportunities (from {len(all_opportunities)} raw)")
         logger.info(f"After deduplication: {len(unique_opportunities)} unique opportunities")
 
         # Persist opportunities
         saved_count = 0
         for opp in unique_opportunities:
-            if self.repository.add_opportunity(opp):
+            if self.repository.add(opp):
                 saved_count += 1
 
+        print(f"[ENGINE] Saved {saved_count} new opportunities to repository")
         logger.info(f"Saved {saved_count} new opportunities to repository")
         return unique_opportunities
 

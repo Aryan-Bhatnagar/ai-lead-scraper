@@ -32,25 +32,31 @@ export function useAnalytics() {
   const analytics = useMemo(() => {
     const overview = overviewQ.data
     const trends = trendsQ.data
-    const providers = providersQ.data || []
+    // Backend may return a plain array or {providers: [...]} — normalize both.
+    const providersRaw = providersQ.data || []
+    const providers = Array.isArray(providersRaw) ? providersRaw : providersRaw.providers || []
     const lifecycle = lifecycleQ.data || {}
     const quality = qualityQ.data || {}
     const insights = insightsQ.data || {}
 
-    // KPI cards
+    // KPI cards — every value coerced to a finite number (never [object Object]).
+    const num = (v) => {
+      const n = Number(v)
+      return Number.isFinite(n) ? n : 0
+    }
     const kpis = overview
       ? {
-          totalLeads: overview.total_leads ?? 0,
-          totalCompanies: overview.total_companies ?? 0,
-          averageScore: Math.round(overview.average_score ?? 0),
-          sources: Object.keys(overview.lead_sources || {}).length,
+          totalLeads: num(overview.total_leads ?? 0),
+          aiScoredLeads: num(overview.ai_scored_leads ?? 0),
+          averageScore: Math.round(num(overview.average_score ?? 0)),
+          highQualityLeads: num(overview.high_quality_leads ?? 0),
         }
       : null
 
     // Lead sources bar list
     const leadSources = overview
       ? Object.entries(overview.lead_sources || {})
-          .map(([name, value]) => ({ name, value }))
+          .map(([name, value]) => ({ name, value: num(value) }))
           .sort((a, b) => b.value - a.value)
       : []
 
@@ -75,18 +81,18 @@ export function useAnalytics() {
 
     // Quality pie
     const qualityBreakdown = [
-      { tier: 'excellent', label: 'Excellent', count: quality.excellent ?? 0 },
-      { tier: 'good', label: 'Good', count: quality.good ?? 0 },
-      { tier: 'average', label: 'Average', count: quality.average ?? 0 },
-      { tier: 'poor', label: 'Poor', count: quality.poor ?? 0 },
-    ].filter((q) => q.count > 0 || true)
+      { tier: 'excellent', label: 'Excellent', count: num(quality.excellent ?? 0) },
+      { tier: 'good', label: 'Good', count: num(quality.good ?? 0) },
+      { tier: 'average', label: 'Average', count: num(quality.average ?? 0) },
+      { tier: 'poor', label: 'Poor', count: num(quality.poor ?? 0) },
+    ]
 
     // Provider performance
     const providerPerformance = providers.map((p) => ({
-      name: p.provider_name,
-      leads: p.total_leads,
-      successRate: Math.round((p.success_rate ?? 0) * 100),
-      duplicates: Math.round((p.duplicate_percentage ?? 0) * 100),
+      name: p.provider_name || 'Unknown',
+      leads: num(p.total_leads ?? 0),
+      successRate: Math.round(num(p.success_rate ?? 0) * 100),
+      duplicates: Math.round(num(p.duplicate_percentage ?? 0) * 100),
     }))
 
     // Activity feed: derive from insights + recent stats where possible

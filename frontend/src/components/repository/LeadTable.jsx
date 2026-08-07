@@ -8,12 +8,39 @@ import {
   Download,
 } from 'lucide-react'
 import ScoreBadge from '../reusable/badges/ScoreBadge'
+import OpportunityScoreBadge from '../reusable/badges/OpportunityScoreBadge'
 import LifecycleBadge from '../reusable/badges/LifecycleBadge'
 import SourceBadge from '../reusable/badges/SourceBadge'
 import Pagination from '../reusable/Pagination'
 import { SkeletonTableRow } from '../reusable/SkeletonLoader'
 
 export const PAGE_SIZE = 8
+
+function formatDate(value) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function CompanyLogo({ lead, className = 'w-8 h-8 rounded-lg' }) {
+  const { company_logo: logo, company_name: name } = lead
+  if (logo && logo.startsWith('http')) {
+    return (
+      <img
+        src={logo}
+        alt={name}
+        className={`${className} bg-white object-contain p-1 ring-1 ring-slate-200 dark:ring-slate-700 shrink-0`}
+        onError={(e) => { e.currentTarget.style.display = 'none' }}
+      />
+    )
+  }
+  return (
+    <div className={`${className} bg-primary-50 dark:bg-primary-500/10 flex items-center justify-center text-primary-600 dark:text-primary-400 shrink-0`}>
+      <Building2 className="w-4 h-4" />
+    </div>
+  )
+}
 
 function sortIndicator(active, direction) {
   if (!active) return <ArrowUpDown className="w-3.5 h-3.5 text-slate-300 dark:text-slate-600" />
@@ -115,7 +142,7 @@ export default function LeadTable({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse min-w-[900px]">
+        <table className="w-full text-left border-collapse min-w-[1240px]">
           <thead>
             <tr className="border-b border-slate-200 dark:border-slate-700/60 bg-slate-50/60 dark:bg-slate-800/40">
               <th className="w-10 px-4 py-3">
@@ -128,12 +155,17 @@ export default function LeadTable({
                 />
               </th>
               {headerCell('company_name', 'Company')}
+              {headerCell('contact_name', 'Contact')}
+              {headerCell('email', 'Email')}
+              {headerCell('phone', 'Phone')}
               {headerCell('website', 'Website')}
-              {headerCell('country', 'Country')}
-              {headerCell('quality_score', 'Score', true)}
-              {headerCell('data_quality', 'Quality')}
-              {headerCell('lead_status', 'Lifecycle')}
+              {headerCell('country', 'Location')}
+              {headerCell('company_size_estimate', 'Company Size')}
               {headerCell('source', 'Source')}
+              {headerCell('opportunity_score', 'AI Score', true)}
+              {headerCell('quality_score', 'Quality', true)}
+              {headerCell('lead_status', 'Lifecycle')}
+              {headerCell('updated_at', 'Last Updated')}
               <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 text-right">
                 Actions
               </th>
@@ -141,10 +173,11 @@ export default function LeadTable({
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {loading
-              ? Array.from({ length: PAGE_SIZE }).map((_, i) => <SkeletonTableRow key={i} columns={9} />)
+              ? Array.from({ length: PAGE_SIZE }).map((_, i) => <SkeletonTableRow key={i} columns={13} />)
               : pageLeads.map((lead) => {
                   const isSelected = selected.has(lead.id)
                   const domain = lead.website?.replace(/^https?:\/\//, '').replace(/\/$/, '')
+                  const location = [lead.city, lead.region, lead.country].filter(Boolean).join(', ') || '—'
                   return (
                     <tr
                       key={lead.id}
@@ -166,9 +199,7 @@ export default function LeadTable({
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5 max-w-[230px]">
-                          <div className="w-8 h-8 rounded-lg bg-primary-50 dark:bg-primary-500/10 flex items-center justify-center text-primary-600 dark:text-primary-400 shrink-0 transition-transform duration-200 group-hover:scale-105">
-                            <Building2 className="w-4 h-4" />
-                          </div>
+                          <CompanyLogo lead={lead} />
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-slate-800 dark:text-slate-100 truncate group-hover:text-primary-700 dark:group-hover:text-primary-300 transition-colors">
                               {lead.company_name}
@@ -179,7 +210,21 @@ export default function LeadTable({
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm max-w-[200px]">
+                      <td className="px-4 py-3 max-w-[160px]">
+                        <p className="text-sm text-slate-600 dark:text-slate-300 truncate">
+                          {lead.contact_name || '—'}
+                        </p>
+                        {lead.job_title && (
+                          <p className="text-xs text-slate-400 truncate">{lead.job_title}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[200px]">
+                        {lead.email || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[150px]">
+                        {lead.phone || '—'}
+                      </td>
+                      <td className="px-4 py-3 text-sm max-w-[180px]">
                         <a
                           href={lead.website}
                           target="_blank"
@@ -187,25 +232,29 @@ export default function LeadTable({
                           onClick={(e) => e.stopPropagation()}
                           className="text-primary-600 dark:text-primary-400 hover:underline underline-offset-2 truncate block"
                         >
-                          {domain}
+                          {domain || '—'}
                         </a>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
-                        {lead.country || '—'}
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[140px]">
+                        {location}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[120px]">
+                        {lead.company_size || '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <SourceBadge source={lead.source} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <OpportunityScoreBadge score={lead.opportunity_score} size="sm" />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <ScoreBadge score={lead.score} />
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs font-medium capitalize text-slate-600 dark:text-slate-300">
-                          {lead.quality_tier === 'unknown' ? '—' : lead.quality_tier}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
                         <LifecycleBadge state={lead.lifecycle} />
                       </td>
-                      <td className="px-4 py-3">
-                        <SourceBadge source={lead.source} />
+                      <td className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
+                        {formatDate(lead.last_updated)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button

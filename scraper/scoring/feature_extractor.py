@@ -25,6 +25,27 @@ def _is_business_email(email: str) -> bool:
     return parts[1].lower() not in _GENERIC_DOMAINS
 
 
+def _safe_num(value: object) -> float | int | None:
+    """Coerce a numeric field to a number, or None if it can't be parsed.
+
+    Numeric columns are stored as TEXT in the DB and can arrive as ``''`` or
+    ``'12 reviews'``.  Comparing those against ints raises
+    ``'>' not supported between 'str' and 'int'`` — never crash on that.
+    """
+    if value is None or isinstance(value, bool):
+        return None if value is None else value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        m = re.search(r"[-+]?\d*\.?\d+", value.strip())
+        if m:
+            try:
+                return float(m.group()) if "." in m.group() else int(m.group())
+            except ValueError:
+                return None
+    return None
+
+
 class FeatureExtractor:
     """Extract 0.0‑1.0 quality ratios for each configured feature.
 
@@ -146,11 +167,14 @@ class FeatureExtractor:
         * jobs_completed (Upwork), review_count (Maps), categories.
         """
         signals = 0
-        if lead.jobs_completed is not None and lead.jobs_completed > 0:
+        jobs = _safe_num(lead.jobs_completed)
+        reviews = _safe_num(lead.maps_review_count)
+        rating = _safe_num(lead.rating)
+        if jobs and jobs > 0:
             signals += 1
-        if lead.maps_review_count is not None and lead.maps_review_count > 0:
+        if reviews and reviews > 0:
             signals += 1
-        if lead.rating is not None and lead.rating > 0:
+        if rating and rating > 0:
             signals += 1
         if lead.categories:
             signals += 0.5

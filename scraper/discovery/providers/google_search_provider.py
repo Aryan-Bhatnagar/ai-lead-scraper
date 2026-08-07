@@ -1,7 +1,5 @@
 """
-Google Search Discovery Provider.
-
-Discovers potential leads by performing search queries via the SearchService.
+Google Search Discovery Provider using the existing SearchService.
 """
 
 from __future__ import annotations
@@ -14,10 +12,7 @@ from ...services.search.service import SearchService
 
 class GoogleSearchDiscoveryProvider(DiscoveryProvider):
     """
-    Provider that discovers leads using search engine results.
-
-    Note: Despite the name, it uses the SearchService which may employ
-    different backends (e.g., ddgs) to retrieve results.
+    Provider that discovers leads using Google Search via the SearchService.
     """
 
     name = "google_search"
@@ -38,47 +33,53 @@ class GoogleSearchDiscoveryProvider(DiscoveryProvider):
 
     def discover(self, query: DiscoveryQuery) -> DiscoveryBatch:
         """
-        Discovers leads by generating search queries based on industry and location.
+        Discovers leads by performing search queries via the SearchService.
         """
         candidates: List[RawCandidate] = []
 
-        # 1. Construct search queries
-        # Pattern: "{industry} company {location}"
-        search_query = f"{query.industry} company {query.location}"
-
-        # We also incorporate specific keywords if provided
-        queries_to_run = [search_query]
+        # Construct search queries
+        queries_to_run = []
+        base_query = f"{query.industry} company {query.location}"
+        queries_to_run.append(base_query)
         for kw in query.keywords:
             queries_to_run.append(f"{kw} company {query.location}")
-
-        # 2. Use SearchService to fetch results
-        search_service = SearchService()
 
         total_results_collected = 0
         for q in queries_to_run:
             if total_results_collected >= query.max_results:
                 break
 
-            # Fetch remaining results needed
             remaining = query.max_results - total_results_collected
 
             try:
-                # Use preferred_backend="ddgs" as requested
-                results = search_service.search(
+                # Use SearchService with preferred_backend="ddgs" as in the original
+                results = SearchService().search(
                     query=q,
                     limit=remaining,
                     preferred_backend="ddgs"
                 )
 
                 for res in results:
+                    # Ensure the result has the expected fields
+                    payload = {
+                        "title": res.get("title", ""),
+                        "url": res.get("url", ""),
+                        "snippet": res.get("snippet", ""),
+                        "source_engine": res.get("source_engine", "ddgs"),
+                        "query": q,
+                        "timestamp": res.get("timestamp") or datetime.now(UTC).isoformat()
+                    }
+
                     candidates.append(
                         RawCandidate(
-                            payload=res, # Contains title, snippet, url, source_engine, query, timestamp
+                            payload=payload,
                             source=self.name,
                             fetched_at=datetime.now(UTC)
                         )
                     )
                     total_results_collected += 1
+                    if total_results_collected >= query.max_results:
+                        break
             except Exception as e:
                 print(f"[{self.name}] Error searching for {q}: {e}")
 

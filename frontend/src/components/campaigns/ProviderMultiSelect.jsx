@@ -9,6 +9,7 @@ import GoogleMark from '../badges/GoogleMark'
 export const PROVIDERS = [
   { id: 'google', label: 'Google', icon: GoogleMark, implemented: true },
   { id: 'google_maps', label: 'Google Maps', icon: MapPin, implemented: true },
+  { id: 'google_maps_scraper_kit', label: 'Google Maps Kit', icon: MapPin, implemented: true },
   { id: 'upwork', label: 'Upwork', icon: Cloud, implemented: true },
   { id: 'freelancer', label: 'Freelancer', icon: Camera, implemented: true },
   { id: 'guru', label: 'Guru', icon: Globe, implemented: true },

@@ -15,6 +15,8 @@ class OverviewStats:
     """Overview statistics of the lead database."""
     total_leads: int = 0
     total_companies: int = 0
+    ai_scored_leads: int = 0
+    high_quality_leads: int = 0
     average_score: float = 0.0
     median_score: float = 0.0
     highest_score: int = 0

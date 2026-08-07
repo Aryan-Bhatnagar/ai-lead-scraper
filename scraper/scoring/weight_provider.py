@@ -74,9 +74,10 @@ class WeightProvider:
 
         raw_thresholds: Dict[str, Any] = cfg.get("thresholds", {})
         self.thresholds = {
-            "low_quality": int(raw_thresholds.get("low_quality", 30)),
-            "medium_quality": int(raw_thresholds.get("medium_quality", 55)),
-            "high_quality": int(raw_thresholds.get("high_quality", 75)),
+            "excellent": int(raw_thresholds.get("excellent", 90)),
+            "good": int(raw_thresholds.get("good", 75)),
+            "average": int(raw_thresholds.get("average", 50)),
+            "poor": int(raw_thresholds.get("poor", 0)),
         }
 
     def _use_defaults(self) -> None:
@@ -102,24 +103,24 @@ class WeightProvider:
                 extra={"bonus_per_extra_source": 5},
             ),
             "social_profiles": FeatureWeight(
-                feature="social_profiles", weight=5.0, description="Social Profiles", enabled=True,
+                feature="social_profiles", weight=3.0, description="Social Profiles", enabled=True,
                 extra={"score_per_profile": 1},
             ),
             "company_size_hints": FeatureWeight(
-                feature="company_size_hints", weight=4.0, description="Company Size", enabled=True,
+                feature="company_size_hints", weight=3.0, description="Company Size", enabled=True,
             ),
             "recent_activity": FeatureWeight(
                 feature="recent_activity", weight=2.0, description="Recent Activity", enabled=True,
             ),
             "provider_confidence": FeatureWeight(
-                feature="provider_confidence", weight=1.0, description="Provider Confidence", enabled=True,
+                feature="provider_confidence", weight=2.0, description="Provider Confidence", enabled=True,
             ),
             "ai_enrichment_confidence": FeatureWeight(
-                feature="ai_enrichment_confidence", weight=1.0, description="AI Enrichment", enabled=True,
+                feature="ai_enrichment_confidence", weight=3.0, description="AI Enrichment", enabled=True,
             ),
         }
         self.weights = defaults
-        self.thresholds = {"low_quality": 30, "medium_quality": 55, "high_quality": 75}
+        self.thresholds = {"excellent": 90, "good": 75, "average": 50, "poor": 0}
 
     # ------------------------------------------------------------------
     # Public API
@@ -136,12 +137,14 @@ class WeightProvider:
         return sum(fw.weight for fw in self.enabled_features().values())
 
     def quality_tier(self, score: float) -> str:
-        """Classify a 0‑100 score into 'low', 'medium', or 'high'."""
-        if score >= self.thresholds.get("high_quality", 75):
-            return "high"
-        if score >= self.thresholds.get("medium_quality", 55):
-            return "medium"
-        return "low"
+        """Classify a 0‑100 score into 'excellent', 'good', 'average', or 'poor'."""
+        if score >= self.thresholds.get("excellent", 90):
+            return "excellent"
+        if score >= self.thresholds.get("good", 75):
+            return "good"
+        if score >= self.thresholds.get("average", 50):
+            return "average"
+        return "poor"
 
 
 def default_weight_provider() -> WeightProvider:

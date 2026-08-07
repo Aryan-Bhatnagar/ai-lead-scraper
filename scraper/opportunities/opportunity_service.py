@@ -58,10 +58,11 @@ class OpportunityService:
 
         try:
             # Discover opportunities
-            opportunities = self.engine.discover_opportunities(
+            import asyncio
+            opportunities = asyncio.run(self.engine.discover_opportunities(
                 queries=queries,
                 max_opportunities_per_query=max_opportunities_per_query
-            )
+            ))
             return opportunities
         finally:
             # Restore original provider state

@@ -67,6 +67,8 @@ class UnifiedLead:
     emails: List[str] = field(default_factory=list)
     phones: List[str] = field(default_factory=list)
     socials: Dict[str, Optional[str]] = field(default_factory=dict)
+    contact_name: Optional[str] = None
+    contact_role: Optional[str] = None
 
     # --- Marketplace (freelance platforms) ---
     hourly_rate: Optional[float] = None
@@ -80,6 +82,11 @@ class UnifiedLead:
     coordinates: Optional[Dict[str, float]] = None  # {"lat": ..., "lng": ...}
     business_status: Optional[str] = None
     categories: List[str] = field(default_factory=list)
+    address: Optional[str] = None
+    google_rating: Optional[float] = None
 
     # --- Provenance ---
     provenance: Provenance = field(default_factory=Provenance)
+
+    # --- Metadata (for import adapters and enrichment) ---
+    metadata: Dict[str, Any] = field(default_factory=dict)

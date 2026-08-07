@@ -59,10 +59,16 @@ class WebsiteNormalizer(BaseNormalizer):
             location=location,
             provenance=provenance
         )
-        
-        # Map socials if present in the raw payload (from WebsiteParser)
-        # Note: WebsiteDiscoveryProvider payload often includes a 'social_links' dict
-        socials = payload.get("social_links", {})
+
+        # Map contact fields from the deep scrape payload
+        # Email and phone are already validated by the scraping logic
+        if payload.get("email"):
+            lead.emails = [payload["email"]]
+        if payload.get("phone"):
+            lead.phones = [payload["phone"]]
+
+        # Map social profiles - the field from scrape_site is "socials" not "social_links"
+        socials = payload.get("socials", {})
         if socials:
             lead.socials = socials
 

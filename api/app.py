@@ -25,7 +25,12 @@ by the tests.
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from pathlib import Path
+import sys
 from typing import Any, Dict, List
 
 from flask import Flask, jsonify, request, abort
@@ -34,6 +39,15 @@ import os
 import requests
 from urllib.parse import urlparse
 from flask_cors import CORS
+
+# Ensure the project root is on the Python path so that we can import the
+# `scraper` package regardless of the current working directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+# Also add the current working directory for safety
+if '.' not in sys.path:
+    sys.path.insert(0, '.')
 
 # ``scraper.database`` is the only place where the concrete SQLite
 # connection is created.  Importing it keeps the pipe to the tests
@@ -52,6 +66,8 @@ from scraper.google_maps_discovery import discover_google_maps
 
 from scraper.lead_discovery import discover_leads
 from scraper.google_maps_discovery import discover_google_maps
+from scraper.discovery.orchestrator import DiscoveryOrchestrator
+from scraper.discovery.query import DiscoveryQuery
 
 # ---------------------------------------------------------------------------
 # Helper functions – thin wrappers that delegate to the database module.
@@ -65,12 +81,20 @@ def get_leads(
     filter_status: str | None = None,
     filter_q: str | None = None,
     filter_lead_status: str | None = None,
+    sort_by: str = "id",
+    sort_desc: bool = True,
+    limit: int | None = None,
+    offset: int | None = None,
+    filter_source: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Return all leads, optionally filtered by:
     * ``status`` – the scraper‑generated status field,
     * ``data_quality`` – the quality bucket,
-    * ``lead_status`` – the new CRM lifecycle status.
+    * ``lead_status`` – the new CRM lifecycle status,
+    * ``filter_source`` – the normalized source (Apollo, Upwork, …).
     ``None`` for any filter means no filtering on that column.
+
+    Supports sorting (default: id DESC) and pagination.
     """
     query = "SELECT * FROM leads"
     clauses: List[str] = []
@@ -84,8 +108,32 @@ def get_leads(
     if filter_lead_status:
         clauses.append("lead_status = ?")
         params.append(filter_lead_status)
+    if filter_source:
+        clauses.append("(source = ? OR source_url LIKE ?)")
+        params.extend([filter_source, f"%{filter_source}%"])
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
+
+    # Apply sorting
+    valid_sort_fields = ["id", "company_name", "contact_name", "email", "phone",
+                         "website", "country", "city", "company_size_estimate",
+                         "source", "opportunity_score", "quality_score",
+                         "data_quality", "lead_status", "status", "scraped_at",
+                         "created_at", "updated_at"]
+    if sort_by in valid_sort_fields:
+        direction = "DESC" if sort_desc else "ASC"
+        query += f" ORDER BY {sort_by} {direction}"
+    else:
+        query += " ORDER BY id DESC"
+
+    # Apply pagination
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    if offset is not None:
+        query += " OFFSET ?"
+        params.append(offset)
+
     with db.get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(query, params)
@@ -135,11 +183,27 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         status = request.args.get("status")
         q = request.args.get("data_quality")
         lead_status = request.args.get("lead_status")
+        filter_source = request.args.get("source")
+        sort_by = request.args.get("sort", "id")
+        sort_desc = request.args.get("order", "desc").lower() == "desc"
+        try:
+            limit = int(request.args.get("limit", 50))
+        except ValueError:
+            limit = 50
+        try:
+            offset = int(request.args.get("offset", 0))
+        except ValueError:
+            offset = 0
         leads = get_leads(
             app.config["DATABASE"],
             status,
             q,
             lead_status,
+            sort_by=sort_by,
+            sort_desc=sort_desc,
+            limit=limit,
+            offset=offset,
+            filter_source=filter_source,
         )
         return jsonify({"leads": leads, "count": len(leads)})
 
@@ -452,7 +516,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             analytics_service = AnalyticsService(app.config["DATABASE"])
             data = analytics_service.get_provider_analytics()
             # Return the list of providers directly
-            return jsonify(data["providers"]), 200
+            return jsonify(data), 200
         except Exception as e:
             app.logger.exception("Analytics providers failed")
             abort(500, description=f"Analytics providers failed: {str(e)}")
@@ -978,13 +1042,30 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 description="'max_results' must be between 1 and 50"
             )
 
-        # Step 6: Run discovery
+        # Step 6: Run discovery using orchestrator with legacy persistence
         try:
-            results = discover_leads(
+            # Create query for the orchestrator
+            query = DiscoveryQuery(
                 industry=industry,
                 location=location,
-                max_results=max_results,
+                max_results=max_results
             )
+
+            # Create orchestrator with legacy persistence enabled
+            orchestrator = DiscoveryOrchestrator(legacy_persistence=True)
+
+            # Run the discovery
+            summary = orchestrator.run(query)
+
+            # Convert scored leads to the format expected by the frontend
+            results = []
+            for scored_lead in summary.scored_leads:
+                lead = scored_lead.lead
+                results.append({
+                    "title": lead.company_name or "",
+                    "url": lead.website or "",
+                    "description": lead.description or "",
+                })
         except Exception:
             app.logger.exception("Lead discovery failed")
             return jsonify({

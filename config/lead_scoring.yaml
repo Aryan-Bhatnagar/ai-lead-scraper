@@ -7,32 +7,32 @@
 
 features:
   website_exists:
-    weight: 25
+    weight: 15
     description: "Lead has a website URL"
     enabled: true
 
   business_email:
-    weight: 20
+    weight: 12
     description: "Lead has a business email address (non-generic domain)"
     enabled: true
 
   phone_number:
-    weight: 15
+    weight: 8
     description: "Lead has at least one phone number"
     enabled: true
 
   description_quality:
-    weight: 9
+    weight: 6
     description: "Quality of the company description (length, keyword richness)"
     enabled: true
 
   location_quality:
-    weight: 8
+    weight: 5
     description: "Location data completeness (city, region, country)"
     enabled: true
 
   multiple_sources:
-    weight: 10
+    weight: 6
     description: "Lead discovered by more than one provider"
     enabled: true
 
@@ -42,12 +42,12 @@ features:
     enabled: true
 
   company_size_hints:
-    weight: 3
+    weight: 4
     description: "Company has review counts, categories indicating size"
     enabled: true
 
   recent_activity:
-    weight: 2
+    weight: 3
     description: "Lead data is recent and indicates active business"
     enabled: true
 
@@ -57,12 +57,46 @@ features:
     enabled: true
 
   ai_enrichment_confidence:
-    weight: 3
+    weight: 4
     description: "AI enrichment succeeded and provided additional data"
     enabled: true
 
+  # NEW: Opportunity scoring features
+  google_rating:
+    weight: 8
+    description: "Google Maps rating quality (0-5 stars)"
+    enabled: true
+
+  review_count:
+    weight: 6
+    description: "Number of Google Maps reviews (capped at 100)"
+    enabled: true
+
+  company_size:
+    weight: 8
+    description: "Estimated company size from signals"
+    enabled: true
+
+  ai_enrichment_quality:
+    weight: 10
+    description: "Quality/completeness of AI enrichment"
+    enabled: true
+
 # Minimum thresholds below which a lead is considered low-quality
+# Quality tiers: excellent (90-100), good (75-89), average (50-74), poor (0-49)
 thresholds:
-  low_quality: 30
-  medium_quality: 55
-  high_quality: 75
+  excellent: 90
+  good: 75
+  average: 50
+  poor: 0
+
+# Opportunity score thresholds (separate from quality_score tiers)
+#
+# Calibrated to the realized score distribution: with the current feature set
+# (AI enrichment + contact data), the best leads score ~67 and the model's
+# high band should be reachable.  high >= 64 captures the top ~6% of leads;
+# medium >= 50 the core; low >= 35 the thinner-data tail.
+opportunity_thresholds:
+  high: 64
+  medium: 50
+  low: 35

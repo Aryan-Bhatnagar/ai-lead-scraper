@@ -121,6 +121,29 @@ class OpportunityRepository:
 
         return opportunities[offset:offset + limit]
 
+    def get_opportunities(self,
+                          query: Optional[str] = None,
+                          provider: Optional[str] = None,
+                          category: Optional[str] = None,
+                          skills: Optional[List[str]] = None,
+                          min_budget: Optional[float] = None,
+                          max_budget: Optional[float] = None,
+                          country: Optional[str] = None,
+                          limit: int = 100,
+                          offset: int = 0) -> List[Opportunity]:
+        """Get opportunities with filtering (alias for search)."""
+        return self.search(
+            query=query,
+            provider=provider,
+            category=category,
+            skills=skills,
+            min_budget=min_budget,
+            max_budget=max_budget,
+            country=country,
+            limit=limit,
+            offset=offset
+        )
+
     def count(self,
               query: Optional[str] = None,
               provider: Optional[str] = None,

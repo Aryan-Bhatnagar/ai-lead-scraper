@@ -88,7 +88,9 @@ export function useAllLeads({ enabled = true } = {}) {
   const query = useQuery({
     queryKey: ['leads', 'all'],
     queryFn: async () => {
-      const data = await getLeads()
+      // High limit so every imported lead is present client-side for
+      // filtering/sorting — the backend otherwise defaults to 50.
+      const data = await getLeads({ limit: 10000, sort: 'id', order: 'desc' })
       return (data.leads || []).map(mapApiLead)
     },
     ttl: 30_000,

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Users, Trophy, Gauge, Globe, RefreshCcw } from 'lucide-react'
+import { Users, Trophy, Gauge, Globe, Brain, RefreshCcw } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   BarChart,
@@ -67,10 +67,10 @@ export default function Dashboard() {
 
   const kpis = analytics.kpis
     ? [
-        { title: 'Total Leads', value: analytics.kpis.totalLeads, icon: Users, color: 'primary' },
-        { title: 'Total Companies', value: analytics.kpis.totalCompanies, icon: Trophy, color: 'success' },
-        { title: 'Average Score', value: analytics.kpis.averageScore, icon: Gauge, color: 'warning' },
-        { title: 'Active Sources', value: analytics.kpis.sources, icon: Globe, color: 'danger' },
+        { title: 'Total Leads', value: Number(analytics.kpis.totalLeads || 0), icon: Users, color: 'primary' },
+        { title: 'AI Scored Leads', value: Number(analytics.kpis.aiScoredLeads || 0), icon: Brain, color: 'success' },
+        { title: 'Average Score', value: Number(analytics.kpis.averageScore || 0), icon: Gauge, color: 'warning' },
+        { title: 'High Quality Leads', value: Number(analytics.kpis.highQualityLeads || 0), icon: Trophy, color: 'danger' },
       ]
     : []
 

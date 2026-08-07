@@ -24,6 +24,8 @@ class AnalyticsService:
         return {
             "total_leads": overview.total_leads,
             "total_companies": overview.total_companies,
+            "ai_scored_leads": overview.ai_scored_leads,
+            "high_quality_leads": overview.high_quality_leads,
             "average_score": overview.average_score,
             "median_score": overview.median_score,
             "highest_score": overview.highest_score,
@@ -75,23 +77,24 @@ class AnalyticsService:
             "unknown": quality.unknown,
         }
 
-    def get_provider_analytics(self) -> Dict[str, Any]:
-        """Get provider analytics."""
+    def get_provider_analytics(self) -> List[Dict[str, Any]]:
+        """Get provider analytics.
+
+        Returns a plain array (the shape the frontend consumes directly).
+        """
         providers = self.engine.get_provider_analytics()
-        return {
-            "providers": [
-                {
-                    "provider_name": p.provider_name,
-                    "total_leads": p.total_leads,
-                    "average_leads_per_provider": p.average_leads_per_provider,
-                    "success_rate": p.success_rate,
-                    "failure_rate": p.failure_rate,
-                    "duplicate_percentage": p.duplicate_percentage,
-                    "unique_percentage": p.unique_percentage,
-                }
-                for p in providers
-            ]
-        }
+        return [
+            {
+                "provider_name": p.provider_name,
+                "total_leads": p.total_leads,
+                "average_leads_per_provider": p.average_leads_per_provider,
+                "success_rate": p.success_rate,
+                "failure_rate": p.failure_rate,
+                "duplicate_percentage": p.duplicate_percentage,
+                "unique_percentage": p.unique_percentage,
+            }
+            for p in providers
+        ]
 
     def get_lifecycle_distribution(self) -> Dict[str, Any]:
         """Get lifecycle distribution."""
