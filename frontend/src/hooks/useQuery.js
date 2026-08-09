@@ -47,8 +47,10 @@ export function invalidateCache(keys) {
   for (const key of list) {
     if (key == null) continue
     // Exact match or prefix invalidation (e.g. 'analytics' clears all analytics keys)
+    // Keys are JSON strings of arrays like '["analytics","trends"]'
     for (const cachedKey of cache.keys()) {
-      if (cachedKey === key || cachedKey.startsWith(`${key}:`)) {
+      if (cachedKey === key || cachedKey.startsWith(`${key}:`) ||
+          cachedKey.startsWith(`["${key}"`) || cachedKey.startsWith(`["${key}","`)) {
         cache.delete(cachedKey)
       }
     }
@@ -58,6 +60,7 @@ export function invalidateCache(keys) {
 export default function useQuery({ queryKey, queryFn, ttl = DEFAULT_TTL_MS, enabled = true }) {
   const keyStr = useRef(JSON.stringify(queryKey)).current
   const cached = enabled ? readCache(keyStr, ttl) : null
+  console.log(`[useQuery] ${keyStr}: cached=${cached !== null}, loading=`, enabled && !cached)
   const [data, setData] = useState(cached)
   const [loading, setLoading] = useState(enabled && !cached)
   const [error, setError] = useState(null)
@@ -69,16 +72,19 @@ export default function useQuery({ queryKey, queryFn, ttl = DEFAULT_TTL_MS, enab
       if (!force) {
         const hit = readCache(keyStr, ttl)
         if (hit !== null) {
+          console.log(`[useQuery] ${keyStr}: cache hit`)
           setData(hit)
           setLoading(false)
           setError(null)
           return hit
         }
       }
+      console.log(`[useQuery] ${keyStr}: fetching fresh data`)
       setLoading(true)
       setError(null)
       try {
         const result = await fetchOnce(keyStr, () => queryFnRef.current())
+        console.log(`[useQuery] ${keyStr}: fetched data`, result)
         setData(result)
         return result
       } catch (err) {

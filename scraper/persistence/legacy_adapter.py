@@ -123,7 +123,6 @@ class LegacyLeadPersistenceAdapter:
                 "medium": "MEDIUM",
                 "average": "LOW",
                 "low": "LOW",
-                "poor": "LOW",
             }
             legacy_data["data_quality"] = tier_map.get(scored_lead.quality_tier.lower(), "unknown")
             # Add new enriched fields from ScoredLead

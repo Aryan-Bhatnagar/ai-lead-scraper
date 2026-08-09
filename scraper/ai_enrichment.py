@@ -30,7 +30,7 @@ from scraper.database import (
 )
 from scraper.discovery.model import UnifiedLead
 import importlib
-orchestrator_module = importlib.import_module("scraper.import.orchestrator")
+orchestrator_module = importlib.import_module("scraper.import_package.orchestrator")
 ImportOrchestrator = orchestrator_module.ImportOrchestrator
 from scraper.scoring.feature_extractor import FeatureExtractor
 from scraper.scoring.score_calculator import ScoreCalculator

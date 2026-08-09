@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Zap,
   X,
+  Image,
 } from 'lucide-react'
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -43,9 +44,15 @@ export default function Sidebar({
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-slate-700/50 shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
-          <Zap className="w-5 h-5 text-white" />
-        </div>
+        <img
+          src="/assets/companylogo.svg"
+          alt="Bilvaleaf"
+          className="h-8 w-auto shrink-0"
+          onError={(e) => {
+            e.target.src = '/assets/companylogo.webp';
+            e.target.onerror = () => { e.target.style.display = 'none'; };
+          }}
+        />
         {!collapsed && (
           <span className="font-semibold text-white text-sm tracking-wide truncate">
             Bilvaleaf Business Development Platform

@@ -34,7 +34,6 @@ const QUALITY_COLORS = {
   excellent: '#10b981',
   good: '#22c55e',
   average: '#f59e0b',
-  poor: '#f43f5e',
 }
 
 export default function Analytics() {

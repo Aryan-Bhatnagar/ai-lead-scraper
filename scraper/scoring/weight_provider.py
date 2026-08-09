@@ -73,11 +73,11 @@ class WeightProvider:
             self.weights[feat_name] = FeatureWeight.from_dict(feat_name, raw)
 
         raw_thresholds: Dict[str, Any] = cfg.get("thresholds", {})
+        # Three-tier model: Excellent, Good, Average
         self.thresholds = {
-            "excellent": int(raw_thresholds.get("excellent", 90)),
-            "good": int(raw_thresholds.get("good", 75)),
-            "average": int(raw_thresholds.get("average", 50)),
-            "poor": int(raw_thresholds.get("poor", 0)),
+            "excellent": int(raw_thresholds.get("excellent", 70)),
+            "good": int(raw_thresholds.get("good", 50)),
+            "average": int(raw_thresholds.get("average", 30)),
         }
 
     def _use_defaults(self) -> None:
@@ -120,7 +120,8 @@ class WeightProvider:
             ),
         }
         self.weights = defaults
-        self.thresholds = {"excellent": 90, "good": 75, "average": 50, "poor": 0}
+        # Three-tier model: Excellent >= 70, Good >= 50, Average >= 30
+        self.thresholds = {"excellent": 70, "good": 50, "average": 30}
 
     # ------------------------------------------------------------------
     # Public API
@@ -137,14 +138,14 @@ class WeightProvider:
         return sum(fw.weight for fw in self.enabled_features().values())
 
     def quality_tier(self, score: float) -> str:
-        """Classify a 0‑100 score into 'excellent', 'good', 'average', or 'poor'."""
-        if score >= self.thresholds.get("excellent", 90):
+        """Classify a 0‑100 score into 'excellent', 'good', or 'average' (three-tier model)."""
+        if score >= self.thresholds.get("excellent", 70):
             return "excellent"
-        if score >= self.thresholds.get("good", 75):
+        if score >= self.thresholds.get("good", 50):
             return "good"
-        if score >= self.thresholds.get("average", 50):
+        if score >= self.thresholds.get("average", 30):
             return "average"
-        return "poor"
+        return "average"  # Below threshold still gets 'average' as lowest tier
 
 
 def default_weight_provider() -> WeightProvider:

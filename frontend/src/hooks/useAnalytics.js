@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useEffect, useRef } from 'react'
 import useQuery, { invalidateCache } from './useQuery'
 import {
   getOverview,
@@ -17,6 +17,13 @@ import {
  * normalizes the responses for the Dashboard components.
  */
 export function useAnalytics() {
+  // Invalidate cache synchronously before hooks read it
+  const invalidated = useRef(false)
+  if (!invalidated.current) {
+    invalidateCache('analytics')
+    invalidated.current = true
+  }
+
   const overviewQ = useQuery({ queryKey: ['analytics', 'overview'], queryFn: getOverview })
   const trendsQ = useQuery({ queryKey: ['analytics', 'trends'], queryFn: getTrends })
   const providersQ = useQuery({ queryKey: ['analytics', 'providers'], queryFn: getProviders })
@@ -28,6 +35,14 @@ export function useAnalytics() {
     overviewQ.loading || trendsQ.loading || providersQ.loading || lifecycleQ.loading || qualityQ.loading
   const error =
     overviewQ.error || trendsQ.error || providersQ.error || lifecycleQ.error || qualityQ.error || insightsQ.error
+
+  // Debug: log the raw data from each query
+  console.log('[useAnalytics] overviewQ.data:', overviewQ.data)
+  console.log('[useAnalytics] trendsQ.data:', trendsQ.data)
+  console.log('[useAnalytics] providersQ.data:', providersQ.data)
+  console.log('[useAnalytics] lifecycleQ.data:', lifecycleQ.data)
+  console.log('[useAnalytics] qualityQ.data:', qualityQ.data)
+  console.log('[useAnalytics] insightsQ.data:', insightsQ.data)
 
   const analytics = useMemo(() => {
     const overview = overviewQ.data
@@ -50,10 +65,11 @@ export function useAnalytics() {
           aiScoredLeads: num(overview.ai_scored_leads ?? 0),
           averageScore: Math.round(num(overview.average_score ?? 0)),
           highQualityLeads: num(overview.high_quality_leads ?? 0),
+          totalCompanies: num(overview.total_companies ?? 0),
         }
       : null
 
-    // Lead sources bar list
+    // Lead sources bar list - ensure we handle objects properly
     const leadSources = overview
       ? Object.entries(overview.lead_sources || {})
           .map(([name, value]) => ({ name, value: num(value) }))
@@ -65,13 +81,14 @@ export function useAnalytics() {
       date: new Date(p.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       leads: p.count,
     }))
+    console.log('[useAnalytics] trends raw:', trends?.daily?.length, 'entries')
+    console.log('[useAnalytics] discoveryTimeline:', discoveryTimeline.length, 'entries, non-zero:', discoveryTimeline.filter(d => d.leads > 0).length)
 
     // Score histogram from quality buckets (server buckets)
     const scoreDistribution = [
       { range: 'Excellent', count: quality.excellent ?? 0, key: 'excellent' },
       { range: 'Good', count: quality.good ?? 0, key: 'good' },
       { range: 'Average', count: quality.average ?? 0, key: 'average' },
-      { range: 'Poor', count: quality.poor ?? 0, key: 'poor' },
     ]
 
     // Lifecycle funnel
@@ -84,25 +101,25 @@ export function useAnalytics() {
       { tier: 'excellent', label: 'Excellent', count: num(quality.excellent ?? 0) },
       { tier: 'good', label: 'Good', count: num(quality.good ?? 0) },
       { tier: 'average', label: 'Average', count: num(quality.average ?? 0) },
-      { tier: 'poor', label: 'Poor', count: num(quality.poor ?? 0) },
     ]
 
     // Provider performance
     const providerPerformance = providers.map((p) => ({
       name: p.provider_name || 'Unknown',
       leads: num(p.total_leads ?? 0),
-      successRate: Math.round(num(p.success_rate ?? 0) * 100),
-      duplicates: Math.round(num(p.duplicate_percentage ?? 0) * 100),
+      successRate: Math.round(num(p.success_rate ?? 0)), // already a percentage from backend
+      duplicates: Math.round(num(p.duplicate_percentage ?? 0)), // already a percentage from backend
     }))
 
     // Activity feed: derive from insights + recent stats where possible
     const activity = []
     if (insights.most_contacted_leads?.length) {
       const top = insights.most_contacted_leads[0]
+      const companyName = top.company_name
       activity.push({
         id: 'contacted',
         type: 'lifecycle',
-        text: `${top.company_name} has ${top.contact_attempts} outreach attempts`,
+        text: `${companyName ? `${companyName} has` : 'A lead has'} ${top.contact_attempts} outreach attempts`,
         time: 'recent',
       })
     }

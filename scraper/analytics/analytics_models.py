@@ -50,10 +50,9 @@ class TrendData:
 @dataclass
 class QualityAnalytics:
     """Quality distribution based on score thresholds."""
-    excellent: int = 0   # score >= 90
-    good: int = 0        # 70 <= score < 90
-    average: int = 0     # 50 <= score < 70
-    poor: int = 0        # score < 50
+    excellent: int = 0   # score >= 70
+    good: int = 0        # 50 <= score < 70
+    average: int = 0     # 30 <= score < 50
     unknown: int = 0     # score is None or not available
 
 

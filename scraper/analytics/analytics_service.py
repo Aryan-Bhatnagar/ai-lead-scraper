@@ -39,7 +39,6 @@ class AnalyticsService:
                 "excellent": quality.excellent,
                 "good": quality.good,
                 "average": quality.average,
-                "poor": quality.poor,
                 "unknown": quality.unknown,
             },
         }
@@ -73,7 +72,6 @@ class AnalyticsService:
             "excellent": quality.excellent,
             "good": quality.good,
             "average": quality.average,
-            "poor": quality.poor,
             "unknown": quality.unknown,
         }
 

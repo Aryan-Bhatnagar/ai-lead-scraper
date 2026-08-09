@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Users, Trophy, Gauge, Globe, Brain, RefreshCcw } from 'lucide-react'
+import { Users, Trophy, Gauge, Globe, Brain, RefreshCcw, Image } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import {
   BarChart,
@@ -33,7 +33,6 @@ const PIE_COLORS = {
   excellent: '#10b981',
   good: '#22c55e',
   average: '#f59e0b',
-  poor: '#f43f5e',
   unknown: '#94a3b8',
 }
 
@@ -87,20 +86,36 @@ export default function Dashboard() {
 
   const maxDiscovery = Math.max(...analytics.discoveryTimeline.map((d) => d.leads), 1)
 
+  // Debug
+  console.log('[Dashboard] analytics.discoveryTimeline:', analytics.discoveryTimeline)
+  console.log('[Dashboard] analytics.discoveryTimeline.length:', analytics.discoveryTimeline.length)
+  console.log('[Dashboard] maxDiscovery:', maxDiscovery)
+
   return (
     <div>
       <PageHeader
         title="Dashboard"
         subtitle="Strategic overview of your lead discovery engine."
       >
-        <button
-          onClick={refetch}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors disabled:opacity-50"
-        >
-          <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-4">
+          <img
+            src="/assets/companylogo.svg"
+            alt="Bilvaleaf"
+            className="h-8 w-auto"
+            onError={(e) => {
+              e.target.src = '/assets/companylogo.webp';
+              e.target.onerror = () => { e.target.style.display = 'none'; };
+            }}
+          />
+          <button
+            onClick={refetch}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-colors disabled:opacity-50"
+          >
+            <RefreshCcw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
       </PageHeader>
 
       {/* KPI Cards */}
@@ -208,7 +223,7 @@ export default function Dashboard() {
           )}
         </ChartCard>
 
-        <ChartCard title="Quality Breakdown" subtitle="Excellent / good / average / poor" className="animate-fade-up stagger-2 flex flex-col">
+        <ChartCard title="Quality Breakdown" subtitle="Excellent / good / average" className="animate-fade-up stagger-2 flex flex-col">
           {loading ? (
             <SkeletonLoader variant="chart" />
           ) : (

@@ -6,6 +6,8 @@ import {
   Eye,
   Building2,
   Download,
+  Trash2,
+  AlertCircle,
 } from 'lucide-react'
 import ScoreBadge from '../reusable/badges/ScoreBadge'
 import OpportunityScoreBadge from '../reusable/badges/OpportunityScoreBadge'
@@ -63,6 +65,7 @@ export default function LeadTable({
   leads,
   loading = false,
   onView,
+  onDelete, // New callback for bulk delete
   // server-driven props (all optional — fall back to internal defaults)
   page: pageProp = 1,
   totalPages: totalPagesProp = 1,
@@ -74,6 +77,7 @@ export default function LeadTable({
   onExport,
 }) {
   const [selected, setSelected] = useState(() => new Set())
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const pageLeads = leads
   const totalItems = totalItemsProp ?? leads.length
@@ -101,6 +105,25 @@ export default function LeadTable({
     if (toExport.length === 0) return
     onExport?.(toExport)
     setSelected(new Set())
+  }
+
+  const handleBulkDelete = () => {
+    if (selected.size === 0) return
+    setShowDeleteConfirm(true)
+  }
+
+  const confirmBulkDelete = async () => {
+    const toDelete = leads.filter((l) => selected.has(l.id))
+    if (toDelete.length === 0) return
+    const leadIds = toDelete.map((l) => l.id)
+    try {
+      await onDelete?.(leadIds)
+      setSelected(new Set())
+      setShowDeleteConfirm(false)
+    } catch (error) {
+      console.error('Bulk delete failed:', error)
+      setShowDeleteConfirm(false)
+    }
   }
 
   const headerCell = (key, label, numeric = false) => (
@@ -132,11 +155,51 @@ export default function LeadTable({
               Export CSV
             </button>
             <button
+              onClick={handleBulkDelete}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete
+            </button>
+            <button
               onClick={() => setSelected(new Set())}
               className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
               Clear
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in">
+          <div className="glass-card rounded-2xl p-6 w-full max-w-md mx-4 animate-slide-up">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Delete {selected.size} lead{selected.size === 1 ? '' : 's'}?</h3>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 mb-6">
+              This action cannot be undone. The selected leads will be permanently removed from the database.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmBulkDelete}
+                disabled={loading}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete Permanently
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -239,7 +302,7 @@ export default function LeadTable({
                         {location}
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[120px]">
-                        {lead.company_size || '—'}
+                        {lead.company_size || lead.company_size_estimate || '—'}
                       </td>
                       <td className="px-4 py-3">
                         <SourceBadge source={lead.source} />

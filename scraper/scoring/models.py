@@ -7,9 +7,10 @@ No I/O or business logic — pure data containers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, TYPE_CHECKING
 
-from scraper.discovery.model import UnifiedLead
+if TYPE_CHECKING:
+    from scraper.discovery.model import UnifiedLead
 
 
 @dataclass
@@ -50,7 +51,7 @@ class ScoreExplanation:
 
     overall_score: int = 0  # 0-100
     breakdowns: List[ScoreBreakdown] = field(default_factory=list)
-    quality_tier: str = "low"
+    quality_tier: str = "average"
 
     def render_lines(self) -> List[str]:
         """Return a human-readable list of lines explaining the score."""
@@ -69,7 +70,7 @@ class ScoreExplanation:
         return "\n".join(self.render_lines())
 
     def quality_tier_label(self) -> str:
-        tier_labels = {"low": "Low Quality", "medium": "Medium Quality", "high": "High Quality"}
+        tier_labels = {"average": "Average", "good": "Good", "excellent": "Excellent"}
         return tier_labels.get(self.quality_tier, self.quality_tier)
 
 
@@ -80,10 +81,10 @@ class ScoredLead:
     The original lead is kept intact — no mutation.
     """
 
-    lead: UnifiedLead
+    lead: "UnifiedLead"
     overall_score: int = 0  # 0-100
     explanation: ScoreExplanation = field(default_factory=ScoreExplanation)
-    quality_tier: str = "low"
+    quality_tier: str = "average"
 
     @property
     def company_name(self) -> str:

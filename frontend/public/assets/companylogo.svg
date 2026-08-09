@@ -1,0 +1,7 @@
+<svg width="120" height="40" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="40" rx="8" fill="#1e293b"/>
+  <text x="60" y="26" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#6366f1" text-anchor="middle" letter-spacing="-0.5">Bilvaleaf</text>
+  <circle cx="95" cy="12" r="3" fill="#10b981"/>
+  <circle cx="102" cy="12" r="2.5" fill="#22c55e"/>
+  <circle cx="109" cy="12" r="2" fill="#f59e0b"/>
+</svg>

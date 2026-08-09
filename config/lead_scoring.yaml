@@ -82,13 +82,11 @@ features:
     description: "Quality/completeness of AI enrichment"
     enabled: true
 
-# Minimum thresholds below which a lead is considered low-quality
-# Quality tiers: excellent (90-100), good (75-89), average (50-74), poor (0-49)
+# Three-tier quality model: Excellent (>=70), Good (>=50), Average (>=30)
 thresholds:
-  excellent: 90
-  good: 75
-  average: 50
-  poor: 0
+  excellent: 70
+  good: 50
+  average: 30
 
 # Opportunity score thresholds (separate from quality_score tiers)
 #

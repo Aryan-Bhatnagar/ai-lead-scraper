@@ -32,6 +32,7 @@ def _apply_filters(
     - source (str): source_url contains
     - status (str): scraper status exact match
     - lead_status (str): CRM lead_status exact match
+    - search (str): global search across all lead fields (company_name, contact_name, email, phone, website, city, country, industry, company_description, address, source, source_url)
     """
     clauses: list[str] = []
     if filters.get("company_name"):
@@ -64,6 +65,16 @@ def _apply_filters(
     if filters.get("lead_status"):
         clauses.append("lead_status = ?")
         params.append(filters["lead_status"])
+    if filters.get("search"):
+        search_term = f"%{filters['search']}%"
+        search_fields = [
+            "company_name", "contact_name", "email", "phone", "website",
+            "city", "country", "industry", "company_description", "address",
+            "source", "source_url"
+        ]
+        search_clauses = " OR ".join([f"{field} LIKE ?" for field in search_fields])
+        clauses.append(f"({search_clauses})")
+        params.extend([search_term] * len(search_fields))
 
     if clauses:
         base_query += " WHERE " + " AND ".join(clauses)
@@ -316,10 +327,17 @@ def bulk_delete_leads(db_path: Path | str, lead_ids: list[int]) -> int:
     Returns:
         Number of leads successfully deleted.
     """
+    if not lead_ids:
+        return 0
+
     deleted_count = 0
-    for lead_id in lead_ids:
-        if delete_lead(db_path, lead_id):
-            deleted_count += 1
+    placeholders = ', '.join(['?'] * len(lead_ids))
+    query = f"DELETE FROM leads WHERE id IN ({placeholders})"
+
+    with db.get_connection(db_path) as conn:
+        cursor = conn.execute(query, lead_ids)
+        deleted_count = cursor.rowcount
+
     return deleted_count
 
 

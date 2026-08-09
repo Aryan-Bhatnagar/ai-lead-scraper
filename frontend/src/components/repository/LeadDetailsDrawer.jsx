@@ -93,7 +93,6 @@ function qualityTierClass(tier) {
   if (t === 'excellent') return 'text-emerald-600 dark:text-emerald-400'
   if (t === 'good') return 'text-success-600 dark:text-success-500'
   if (t === 'average') return 'text-warning-600 dark:text-warning-500'
-  if (t === 'poor') return 'text-danger-600 dark:text-danger-500'
   return 'text-slate-500 dark:text-slate-400'
 }
 

@@ -21,13 +21,14 @@ export function normalizeSourceName(rawSource) {
   // Friendly names (exact match, case-insensitive)
   const FRIENDLY = {
     'apollo': 'Apollo',
-    'zoominfo': 'ZoomInfo',
-    'lusha': 'Lusha',
     'google_maps': 'Google Maps',
     'google maps': 'Google Maps',
     'googlemaps': 'Google Maps',
-    'google_maps_scraper_kit': 'Google Maps Kit',
-    'google_maps_kit': 'Google Maps Kit',
+    'google_maps_scraper_kit': 'Google Maps',
+    'google_maps_kit': 'Google Maps',
+    'google_places': 'Google Maps',
+    'google places': 'Google Maps',
+    'googleplaces': 'Google Maps',
     'google_search': 'Google Search',
     'google search': 'Google Search',
     'googlesearch': 'Google Search',
@@ -54,12 +55,12 @@ export function normalizeSourceName(rawSource) {
   // Dataset provenance URLs: imported://dataset_lead-scraper-apollo-zoominfo-...
   const lower = rawSource.toLowerCase()
   if (lower.includes('apollo')) return 'Apollo'
-  if (lower.includes('zoominfo')) return 'ZoomInfo'
-  if (lower.includes('lusha')) return 'Lusha'
+  if (lower.includes('zoominfo')) return 'Apollo'  // Map to Apollo
+  if (lower.includes('lusha')) return 'Apollo'    // Map to Apollo
   if (lower.includes('upwork')) return 'Upwork'
-  if (lower.includes('freelancer')) return 'Freelancer'
-  if (lower.includes('peopleperhour') || lower.includes('people_per_hour')) return 'PeoplePerHour'
-  if (lower.includes('guru')) return 'Guru'
+  if (lower.includes('freelancer')) return 'Upwork' // Map to Upwork
+  if (lower.includes('peopleperhour') || lower.includes('people_per_hour')) return 'Upwork'
+  if (lower.includes('guru')) return 'Upwork'
 
   // imported:// paths: try to guess the dataset name
   if (rawSource.startsWith('imported://')) {
@@ -81,7 +82,7 @@ export function normalizeSourceName(rawSource) {
     if (lower.includes(key) && key.length > 3) return label
   }
 
-  return rawSource || 'Unknown'
+  return 'Unknown'
 }
 
 /**
@@ -99,15 +100,18 @@ export function deriveSourceField(apiLead = {}) {
 function deriveQualityTier(score, dataQuality, qualityTier) {
   // If backend provides quality_tier (from ScoredLead), use it
   if (qualityTier) return String(qualityTier).toLowerCase()
-  // Fallback to data_quality (HIGH/MEDIUM/LOW)
-  if (dataQuality) return String(dataQuality).toLowerCase()
-  // Fallback to score-based derivation
+  // Fallback to data_quality (HIGH/MEDIUM/LOW) - map to three-tier
+  if (dataQuality) {
+    const dq = String(dataQuality).toLowerCase()
+    if (dq === 'high') return 'excellent'
+    if (dq === 'medium') return 'good'
+    return 'average'
+  }
+  // Fallback to score-based derivation (three-tier model)
   if (typeof score !== 'number') return QUALITY_DEFAULT
-  if (score >= 90) return 'excellent'
-  if (score >= 75) return 'good'
-  if (score >= 50) return 'average'
-  if (score > 0) return 'poor'
-  return QUALITY_DEFAULT
+  if (score >= 70) return 'excellent'
+  if (score >= 50) return 'good'
+  return 'average'
 }
 
 function deriveSource(sourceUrl, sourcePage) {
@@ -207,6 +211,8 @@ export function mapApiLead(apiLead = {}) {
   // Helper to parse a JSON-array column safely
   const parseJsonList = (val) => {
     if (!val) return null
+    // Empty string means no data
+    if (typeof val === 'string' && val.trim() === '') return null
     if (Array.isArray(val)) return val
     if (typeof val === 'string') {
       try {
@@ -252,9 +258,11 @@ export function mapApiLead(apiLead = {}) {
     google_rating: apiLead.google_rating,
     maps_review_count: apiLead.maps_review_count,
     categories: parseJsonList(apiLead.categories),
-    socials: apiLead.socials_json ? (typeof apiLead.socials_json === 'string' ? JSON.parse(apiLead.socials_json) : apiLead.socials_json) : null,
+    socials: apiLead.socials_json && typeof apiLead.socials_json === 'string' && apiLead.socials_json.trim() !== ''
+      ? (typeof apiLead.socials_json === 'string' ? JSON.parse(apiLead.socials_json) : apiLead.socials_json)
+      : null,
 
-    // AI Enrichment fields
+    // AI Enrichment fields - mapped to match LeadDetailsDrawer expectations
     ai_summary: apiLead.ai_summary || null,
     pain_points: parseJsonList(apiLead.pain_points),
     recommended_service: apiLead.recommended_service || null,
@@ -267,6 +275,16 @@ export function mapApiLead(apiLead = {}) {
     opportunity_score: apiLead.opportunity_score || null,
     company_logo: apiLead.company_logo || null,
     discovery_date: apiLead.discovery_date || null,
+    // Add job_title as alias for contact_role
+    job_title: apiLead.contact_role || null,
+    // Add region as alias for city (since we don't have a separate region field)
+    region: apiLead.city || null,
+    // Add description as alias for company_description
+    description: apiLead.company_description || null,
+    // Ensure score is always a number (quality_score)
+    score: score,
+    // Ensure lifecycle is uppercase string
+    lifecycle: lifecycle,
 
     _raw: apiLead,
   }

@@ -359,6 +359,8 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         """Search leads by various criteria."""
         # Extract query parameters
         filters = {}
+        if request.args.get("search"):
+            filters["search"] = request.args.get("search")
         if request.args.get("company"):
             filters["company_name"] = request.args.get("company")
         if request.args.get("website"):
@@ -472,6 +474,53 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         except Exception as e:
             app.logger.exception("Failed to get lead statistics")
             abort(500, description=f"Failed to get lead statistics: {str(e)}")
+
+    @app.route("/api/leads/cities", methods=["GET"])
+    def get_unique_cities():
+        """Get unique cities from leads for filter dropdown."""
+        try:
+            with db.get_connection(app.config["DATABASE"]) as conn:
+                cursor = conn.execute("""
+                    SELECT DISTINCT city FROM leads
+                    WHERE city IS NOT NULL AND city != ''
+                    ORDER BY city ASC
+                """)
+                cities = [row[0] for row in cursor.fetchall()]
+            return jsonify({"cities": cities, "count": len(cities)}), 200
+        except Exception as e:
+            app.logger.exception("Failed to get cities")
+            abort(500, description=f"Failed to get cities: {str(e)}")
+
+    @app.route("/api/leads/bulk", methods=["DELETE"])
+    def bulk_delete_leads():
+        """Delete multiple leads by IDs."""
+        raw = request.get_data(cache=False)
+        if not raw:
+            abort(400, description="Request body is missing")
+        try:
+            payload = json.loads(raw)
+        except Exception:
+            abort(400, description="Invalid JSON payload")
+        if not isinstance(payload, dict):
+            abort(400, description="JSON body must be an object")
+
+        lead_ids = payload.get("lead_ids")
+        if not isinstance(lead_ids, list):
+            abort(400, description="'lead_ids' must be a list")
+        if len(lead_ids) == 0:
+            abort(400, description="'lead_ids' list cannot be empty")
+
+        # Validate all IDs are integers
+        for i, lid in enumerate(lead_ids):
+            if not isinstance(lid, int):
+                abort(400, description=f"Lead ID at index {i} must be an integer")
+
+        try:
+            deleted_count = lead_service.bulk_delete_leads(app.config["DATABASE"], lead_ids)
+            return jsonify({"deleted_count": deleted_count}), 200
+        except Exception:
+            app.logger.exception("Bulk delete failed")
+            abort(500, description="Bulk delete failed")
 
     # -------------------------------------------------------------------
     # Analytics endpoints (Phase 21A)
