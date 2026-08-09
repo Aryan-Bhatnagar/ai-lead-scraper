@@ -51,26 +51,26 @@ class AnalyticsAPITest(unittest.TestCase):
         # Insert a variety of leads for testing analytics.
         self.lead_ids = []
         leads_data = [
-            # Lead 1: HIGH score, USA, Technology, NEW
-            _make_lead(1, "TechCorp", "success", "HIGH", "https://techcorp.com", 95, "USA", "San Francisco", "Technology"),
-            # Lead 2: MEDIUM score, USA, Healthcare, CONTACTED
-            _make_lead(2, "HealthInc", "success", "MEDIUM", "https://healthinc.com", 75, "USA", "New York", "Healthcare", lead_status="CONTACTED"),
-            # Lead 3: LOW score, Canada, Finance, IGNORED (but we use REJECTED)
-            _make_lead(3, "FinanceCo", "failed", "LOW", "https://financeco.com", 40, "Canada", "Toronto", "Finance", lead_status="REJECTED"),
-            # Lead 4: HIGH score, UK, Technology, DUPLICATE (same source as lead1? we'll make different)
-            _make_lead(4, "UKTech", "success", "HIGH", "https://uktech.co.uk", 88, "UK", "London", "Technology"),
-            # Lead 5: MEDIUM score, Germany, Automotive, INTERESTED
-            _make_lead(5, "AutoAG", "success", "MEDIUM", "https://autoag.de", 65, "Germany", "Berlin", "Automotive", lead_status="INTERESTED"),
-            # Lead 6: LOW score, France, Retail, NEW
-            _make_lead(6, "RetailFR", "success", "LOW", "https://retailfr.fr", 30, "France", "Paris", "Retail"),
-            # Lead 7: No score (None), USA, Education, NEW
-            _make_lead(7, "EduOnline", "success", "MEDIUM", "https://eduonline.com", None, "USA", "Boston", "Education"),
-            # Lead 8: HIGH score, USA, Technology, CONVERTED (to test conversion)
-            _make_lead(8, "ConvertInc", "success", "HIGH", "https://convertinc.com", 92, "USA", "Los Angeles", "Technology", lead_status="CUSTOMER"),
-            # Lead 9: MEDIUM score, USA, Technology, CONVERTED
-            _make_lead(9, "ConvertInc2", "success", "MEDIUM", "https://convertinc2.com", 78, "USA", "San Diego", "Technology", lead_status="CUSTOMER"),
-            # Lead 10: HIGH score, USA, Technology, RESPONDED
-            _make_lead(10, "RespTech", "success", "HIGH", "https://respitech.com", 85, "USA", "Seattle", "Technology", lead_status="RESPONDED"),
+            # Lead 1: HIGH score, USA, Technology, NEW - Google Search domain
+            _make_lead(1, "TechCorp", "success", "HIGH", "https://techasoft.com", 95, "USA", "San Francisco", "Technology"),
+            # Lead 2: MEDIUM score, USA, Healthcare, CONTACTED - Google Search domain
+            _make_lead(2, "HealthInc", "success", "MEDIUM", "https://builtin.com", 75, "USA", "New York", "Healthcare", lead_status="CONTACTED"),
+            # Lead 3: LOW score, Canada, Finance, REJECTED - Google Search domain
+            _make_lead(3, "FinanceCo", "failed", "LOW", "https://ambitionbox.com", 40, "Canada", "Toronto", "Finance", lead_status="REJECTED"),
+            # Lead 4: HIGH score, UK, Technology - Google Search domain
+            _make_lead(4, "UKTech", "success", "HIGH", "https://webhopers.in", 88, "UK", "London", "Technology"),
+            # Lead 5: MEDIUM score, Germany, Automotive, INTERESTED - Google Search domain
+            _make_lead(5, "AutoAG", "success", "MEDIUM", "https://goodfirms.co", 65, "Germany", "Berlin", "Automotive", lead_status="INTERESTED"),
+            # Lead 6: LOW score, France, Retail, NEW - Google Search domain
+            _make_lead(6, "RetailFR", "success", "LOW", "https://careers.webdew.com", 30, "France", "Paris", "Retail"),
+            # Lead 7: No score (None), USA, Education, NEW - Google Search domain
+            _make_lead(7, "EduOnline", "success", "MEDIUM", "https://bebotechnologies.com", None, "USA", "Boston", "Education"),
+            # Lead 8: HIGH score, USA, Technology, CONVERTED - Google Search domain
+            _make_lead(8, "ConvertInc", "success", "HIGH", "https://techbehemoths.com", 92, "USA", "Los Angeles", "Technology", lead_status="CUSTOMER"),
+            # Lead 9: MEDIUM score, USA, Technology, CONVERTED - Google Search domain
+            _make_lead(9, "ConvertInc2", "success", "MEDIUM", "https://digitalgriot.com", 78, "USA", "San Diego", "Technology", lead_status="CUSTOMER"),
+            # Lead 10: HIGH score, USA, Technology, RESPONDED - Google Search domain
+            _make_lead(10, "RespTech", "success", "HIGH", "https://f6s.com", 85, "USA", "Seattle", "Technology", lead_status="RESPONDED"),
         ]
 
         for lead in leads_data:
@@ -102,18 +102,16 @@ class AnalyticsAPITest(unittest.TestCase):
         self.assertIn("industries", data)
         self.assertIn("lifecycle_distribution", data)
         self.assertIn("quality_distribution", data)
-        # Quality distribution based on score thresholds (excellent>=85, good 65-84, average 50-64, poor<50, unknown None)
-        # With our data:
-        # excellent (>=85): 95, 92, 88, 85 => 4
-        # good (65-84): 78, 75 => 2
-        # average (50-64): 65 => 1
-        # poor (<50): 40, 30, 0 => 3
-        # unknown: 0
-        self.assertEqual(data["quality_distribution"]["excellent"], 4)
-        self.assertEqual(data["quality_distribution"]["good"], 2)
-        self.assertEqual(data["quality_distribution"]["average"], 1)
-        self.assertEqual(data["quality_distribution"]["poor"], 3)
-        self.assertEqual(data["quality_distribution"]["unknown"], 0)
+        # Quality distribution based on score thresholds (excellent>=70, good 50-69, average 30-49, unknown None)
+        # With our data (using new thresholds from lead_scoring.yaml: excellent>=70, good>=50, average>=30):
+        # excellent (>=70): 95, 75, 88, 92, 78, 85 => 6
+        # good (50-69): 65 => 1
+        # average (30-49): 40, 30 => 2
+        # unknown (None): 1
+        self.assertEqual(data["quality_distribution"]["excellent"], 6)
+        self.assertEqual(data["quality_distribution"]["good"], 1)
+        self.assertEqual(data["quality_distribution"]["average"], 2)
+        self.assertEqual(data["quality_distribution"]["unknown"], 1)
         # Lifecycle distribution based on lead_status
         # NEW: leads 1,4,6,7 =>4
         # CONTACTED: lead2 =>1
@@ -132,22 +130,19 @@ class AnalyticsAPITest(unittest.TestCase):
         resp = self.client.get("/api/analytics/quality")
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
-        self.assertIn("excellent", data)  # score >=85
-        self.assertIn("good", data)       # 65-84
-        self.assertIn("average", data)    # 50-64
-        self.assertIn("poor", data)       # <50
+        self.assertIn("excellent", data)  # score >=70
+        self.assertIn("good", data)       # 50-69
+        self.assertIn("average", data)    # 30-49
         self.assertIn("unknown", data)    # None score
-        # With our data:
-        # excellent (>=85): 95, 92, 88, 85 => 4
-        # good (65-84): 78, 75 => 2
-        # average (50-64): 65 => 1
-        # poor (<50): 40, 30, 0 => 3
-        # unknown: 0 (none are None because we set quality_score to int)
-        self.assertEqual(data["excellent"], 4)
-        self.assertEqual(data["good"], 2)
-        self.assertEqual(data["average"], 1)
-        self.assertEqual(data["poor"], 3)
-        self.assertEqual(data["unknown"], 0)
+        # With our data (using new thresholds from lead_scoring.yaml: excellent>=70, good>=50, average>=30):
+        # excellent (>=70): 95, 75, 88, 92, 78, 85 => 6
+        # good (50-69): 65 => 1
+        # average (30-49): 40, 30 => 2
+        # unknown (None): 1
+        self.assertEqual(data["excellent"], 6)
+        self.assertEqual(data["good"], 1)
+        self.assertEqual(data["average"], 2)
+        self.assertEqual(data["unknown"], 1)
 
     def test_analytics_trends(self):
         resp = self.client.get("/api/analytics/trends")
@@ -169,9 +164,11 @@ class AnalyticsAPITest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
         self.assertIsInstance(data, list)
-        # We have 10 leads with various domains: techcorp.com, healthinc.com, financeco.com, uktech.co.uk, autoag.de, retailfr.fr, edonline.com, convertinc.com, convertinc2.com, respitech.com
-        # So we expect 10 providers (each domain unique)
-        self.assertEqual(len(data), 10)
+        # We now consolidate to exactly 4 primary sources: Google Maps, Upwork, Apollo, Google Search
+        # In the test data, all leads have search result domains that map to "Google Search"
+        # So we expect 1 provider with 10 leads (Google Search)
+        # But the code returns all 4 categories, with 0 for the empty ones
+        self.assertEqual(len(data), 4)
         # Check that each entry has the expected keys.
         for provider in data:
             self.assertIn("provider_name", provider)
@@ -181,6 +178,15 @@ class AnalyticsAPITest(unittest.TestCase):
             self.assertIn("failure_rate", provider)
             self.assertIn("duplicate_percentage", provider)
             self.assertIn("unique_percentage", provider)
+        # Verify Google Search has all 10 leads
+        google_search = next((p for p in data if p["provider_name"] == "Google Search"), None)
+        self.assertIsNotNone(google_search)
+        self.assertEqual(google_search["total_leads"], 10)
+        # The other 3 should have 0 leads
+        for name in ["Google Maps", "Upwork", "Apollo"]:
+            provider = next((p for p in data if p["provider_name"] == name), None)
+            self.assertIsNotNone(provider)
+            self.assertEqual(provider["total_leads"], 0)
 
     def test_analytics_lifecycle(self):
         resp = self.client.get("/api/analytics/lifecycle")

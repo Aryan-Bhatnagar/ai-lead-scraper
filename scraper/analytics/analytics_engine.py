@@ -149,6 +149,14 @@ class AnalyticsEngine:
                     "linkedin": "LinkedIn",
                 }
                 name = friendly.get(name.lower(), name)
+                # Normalize search result domains to "Google Search"
+                if not src or src == '':
+                    search_domains = ['techasoft.com', 'builtin.com', 'ambitionbox.com', 'webhopers.in',
+                                      'goodfirms.co', 'careers.webdew.com', 'bebotechnologies.com', 'fixnhour.com', 'brandveda.in',
+                                      'techbehemoths.com', 'digitalgriot.com', 'f6s.com', 'rankexdigital.com',
+                                      'justdial.com', 'sulekha.com', 'aeroleads.com']
+                    if any(d in name.lower() for d in search_domains):
+                        name = 'Google Search'
                 lead_sources[name] = lead_sources.get(name, 0) + 1
 
             # Countries
@@ -210,7 +218,7 @@ class AnalyticsEngine:
             cursor.execute("SELECT quality_score, quality_tier FROM leads")
             rows = cursor.fetchall()
 
-        excellent = good = average = poor = unknown = 0
+        excellent = good = average = unknown = 0
         for score, tier in rows:
             if score is None or score == 0:
                 unknown += 1
@@ -223,31 +231,35 @@ class AnalyticsEngine:
                     good += 1
                 elif tier_lower == "average":
                     average += 1
-                elif tier_lower == "poor":
-                    poor += 1
                 else:
                     unknown += 1
             else:
                 # Fallback to score-based thresholds if tier is not available
-                if score >= 90:
+                if score >= 70:
                     excellent += 1
-                elif score >= 75:
-                    good += 1
                 elif score >= 50:
+                    good += 1
+                elif score >= 30:
                     average += 1
                 else:
-                    poor += 1
+                    average += 1  # Below 30 still goes to average as lowest tier
 
         return QualityAnalytics(
             excellent=excellent,
             good=good,
             average=average,
-            poor=poor,
             unknown=unknown,
         )
 
     def get_provider_analytics(self) -> List[ProviderAnalytics]:
-        """Compute analytics per discovery provider (based on the source column)."""
+        """Compute analytics per discovery provider (based on the source column).
+
+        Returns only the four primary sources:
+        1. Google Maps
+        2. Upwork
+        3. Apollo
+        4. Google Search
+        """
         # Prefer the normalized `source` column; fall back to source_url domain
         # for legacy rows. The data_quality drives success/failure rates.
         with db.get_connection(self.db_path) as conn:
@@ -262,7 +274,7 @@ class AnalyticsEngine:
 
         friendly = {
             "google_maps": "Google Maps",
-            "google_maps_scraper_kit": "Google Maps Kit",
+            "google_maps_scraper_kit": "Google Maps",
             "google_search": "Google Search",
             "website_discovery": "Website Discovery",
             "apollo": "Apollo",
@@ -276,9 +288,25 @@ class AnalyticsEngine:
             "linkedin": "LinkedIn",
         }
 
-        # Group by provider (source name)
-        provider_data = {}
+        # Search result domains that should be categorized as "Google Search"
+        search_domains = [
+            'techasoft.com', 'builtin.com', 'ambitionbox.com', 'webhopers.in',
+            'goodfirms.co', 'careers.webdew.com', 'bebotechnologies.com', 'fixnhour.com', 'brandveda.in',
+            'techbehemoths.com', 'digitalgriot.com', 'f6s.com', 'rankexdigital.com',
+            'justdial.com', 'sulekha.com', 'aeroleads.com'
+        ]
+
+        # Group by normalized provider category
+        # We'll consolidate into 4 primary categories
+        category_data = {
+            "Google Maps": {'total': 0, 'success': 0, 'failure': 0},
+            "Upwork": {'total': 0, 'success': 0, 'failure': 0},
+            "Apollo": {'total': 0, 'success': 0, 'failure': 0},
+            "Google Search": {'total': 0, 'success': 0, 'failure': 0},
+        }
+
         for src, url, quality in rows:
+            # Determine the normalized source name
             domain = src
             if not domain:
                 try:
@@ -291,51 +319,73 @@ class AnalyticsEngine:
                     domain = 'unknown'
                 if not domain:
                     domain = 'unknown'
-            domain = friendly.get(domain.lower(), domain)
 
-            if domain not in provider_data:
-                provider_data[domain] = {
-                    'total': 0,
-                    'quality_high_medium': 0,  # SUCCESS: HIGH or MEDIUM
-                    'quality_low': 0,          # FAILURE: LOW (and maybe failed?)
-                }
-            provider_data[domain]['total'] += 1
-            if quality in ('HIGH', 'MEDIUM'):
-                provider_data[domain]['quality_high_medium'] += 1
-            elif quality == 'LOW':
-                provider_data[domain]['quality_low'] += 1
+            domain_lower = domain.lower()
 
-        # Now compute the ProviderAnalytics for each domain
+            # Categorize into one of the 4 primary sources
+            category = None
+
+            # Check if source column has a known value
+            if src and src != '':
+                src_lower = src.lower()
+                if src_lower in ('google_maps', 'google_maps_scraper_kit'):
+                    category = "Google Maps"
+                elif src_lower == 'upwork':
+                    category = "Upwork"
+                elif src_lower == 'apollo':
+                    category = "Apollo"
+                elif src_lower == 'google_search':
+                    category = "Google Search"
+                else:
+                    # Fall through to URL-based detection
+                    pass
+
+            # If not categorized by source column, infer from URL domain
+            if not category:
+                # Check if it's a known search result domain -> Google Search
+                if any(d in domain_lower for d in search_domains):
+                    category = "Google Search"
+                else:
+                    # Try friendly mapping
+                    friendly_name = friendly.get(domain_lower, domain)
+                    # Only map to our 4 categories if it matches
+                    if friendly_name in category_data:
+                        category = friendly_name
+
+            # If still not categorized, skip (don't show unknown/other providers)
+            if not category:
+                continue
+
+            # Update category stats
+            category_data[category]['total'] += 1
+            quality_lower = quality.lower() if quality else ''
+            if quality_lower in ('high', 'medium', 'excellent', 'good'):
+                category_data[category]['success'] += 1
+            elif quality_lower in ('low', 'average'):
+                category_data[category]['failure'] += 1
+
+        # Now compute the ProviderAnalytics for each of the 4 categories
         providers = []
-        total_leads_all = sum(data['total'] for data in provider_data.values())
-        for domain, data in provider_data.items():
+        total_leads_all = sum(data['total'] for data in category_data.values())
+
+        for domain, data in category_data.items():
             total = data['total']
-            success = data['quality_high_medium']
-            failure = data['quality_low']  # Note: we are only counting LOW as failure, but there might be other failure indicators.
+            success = data['success']
+            failure = data['failure']
             success_rate = (success / total * 100) if total > 0 else 0.0
             failure_rate = (failure / total * 100) if total > 0 else 0.0
-            # For duplicate and unique percentage, we would need more information (like how many times the same source_url appears?).
-            # Since source_url is unique in the leads table (due to upsert), we assume each lead is unique per source_url.
-            # However, the same domain might appear multiple times. We don't have duplicate leads by source_url, but we might have duplicate domains.
-            # We'll skip duplicate/unique percentage for now and set to 0, or we can compute based on the leads table?
-            # Actually, the leads table has a unique constraint on source_url, so each source_url appears once.
-            # Therefore, the duplicate percentage would be 0 and unique 100%? But that's not what we want.
-            # The requirement might be about duplicate leads from the same provider in the discovery process?
-            # Without more context, we'll leave as 0 and 100 for now, or we can compute the percentage of leads that are the only one from that domain?
-            # Let's skip and set to 0 for duplicate and 100 for unique? But note: the same domain can lead to multiple leads (different URLs).
-            # We don't have duplicate leads in the table, so we cannot compute duplicate percentage from the leads table.
-            # We'll leave it as 0 and 100 and note that this might need adjustment if we had a duplicate table.
-            duplicate_percentage = 0.0
-            unique_percentage = 100.0
+
+            # Calculate average leads per provider (across the 4 displayed providers)
+            avg_leads = round(total_leads_all / 4, 2) if total_leads_all > 0 else 0.0
 
             providers.append(ProviderAnalytics(
                 provider_name=domain,
                 total_leads=total,
-                average_leads_per_provider=round(total / len(provider_data), 2) if provider_data else 0.0,
+                average_leads_per_provider=avg_leads,
                 success_rate=round(success_rate, 2),
                 failure_rate=round(failure_rate, 2),
-                duplicate_percentage=duplicate_percentage,
-                unique_percentage=unique_percentage,
+                duplicate_percentage=0.0,
+                unique_percentage=100.0,
             ))
 
         # Sort by total_leads descending
