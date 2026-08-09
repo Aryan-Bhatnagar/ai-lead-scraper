@@ -6,7 +6,10 @@ into the Discovery Framework.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, UTC
+
+from dateutil.tz import UTC
+fetched_at=datetime.now(UTC)
 from typing import List
 
 from ..provider import DiscoveryProvider, CapabilitySet
@@ -71,7 +74,7 @@ class WebsiteDiscoveryProvider(DiscoveryProvider):
                         RawCandidate(
                             payload=lead_data,
                             source=self.name,
-                            fetched_at=datetime.utcnow()
+                            fetched_at=datetime.now(UTC)
                         )
                     )
             except Exception as e:

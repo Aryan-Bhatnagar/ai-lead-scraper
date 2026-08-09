@@ -11,9 +11,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  X,
+  Image,
 } from 'lucide-react'
-import { useState } from 'react'
-
 const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/discover', label: 'Prospect Intelligence', icon: Search },
@@ -25,25 +25,46 @@ const navItems = [
   { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
-export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false)
+export default function Sidebar({
+  mobileOpen = false,
+  onClose = () => {},
+  collapsed = false,
+  onToggleCollapse = () => {},
+}) {
 
   return (
     <aside
-      className={`${
-        collapsed ? 'w-[72px]' : 'w-64'
-      } h-screen bg-slate-900 text-slate-300 flex flex-col transition-all duration-300 ease-in-out fixed top-0 left-0 z-40`}
+      className={`
+        ${collapsed ? 'lg:w-[72px]' : 'lg:w-64'} w-64
+        h-screen bg-slate-900 text-slate-300 flex flex-col
+        transition-transform lg:transition-all duration-300 ease-in-out
+        fixed top-0 left-0 z-50
+        ${mobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}
+      `}
     >
       {/* Logo */}
       <div className="flex items-center gap-3 px-4 h-16 border-b border-slate-700/50 shrink-0">
-        <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center shrink-0">
-          <Zap className="w-5 h-5 text-white" />
-        </div>
+        <img
+          src="/assets/companylogo.svg"
+          alt="Bilvaleaf"
+          className="h-8 w-auto shrink-0"
+          onError={(e) => {
+            e.target.src = '/assets/companylogo.webp';
+            e.target.onerror = () => { e.target.style.display = 'none'; };
+          }}
+        />
         {!collapsed && (
           <span className="font-semibold text-white text-sm tracking-wide truncate">
             Bilvaleaf Business Development Platform
           </span>
         )}
+        <button
+          onClick={onClose}
+          className="ml-auto p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors lg:hidden"
+          aria-label="Close navigation"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
 
       {/* Navigation */}
@@ -61,16 +82,16 @@ export default function Sidebar() {
               }`
             }
           >
-            <item.icon className="w-5 h-5 shrink-0" />
+            <item.icon className="w-5 h-5 shrink-0 transition-transform duration-200 group-hover:scale-105" />
             {!collapsed && <span className="truncate">{item.label}</span>}
           </NavLink>
         ))}
       </nav>
 
-      {/* Collapse toggle */}
-      <div className="p-3 border-t border-slate-700/50 shrink-0">
+      {/* Collapse toggle (desktop only) */}
+      <div className="p-3 border-t border-slate-700/50 shrink-0 hidden lg:block">
         <button
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={onToggleCollapse}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-colors"
         >
           {collapsed ? (

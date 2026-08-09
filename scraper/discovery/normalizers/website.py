@@ -6,7 +6,7 @@ into the canonical UnifiedLead format.
 """
 
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from .base import BaseNormalizer
@@ -45,7 +45,7 @@ class WebsiteNormalizer(BaseNormalizer):
         provenance = Provenance(
             source=candidate.source,
             source_url=website,
-            discovered_at=datetime.utcnow(), # Or from a timestamp if available in payload
+            discovered_at=datetime.now(UTC), # Or from a timestamp if available in payload
             discovery_query={"industry": query.industry, "location": query.location},
             raw_ref="website_deep_scrape"
         )
@@ -59,10 +59,16 @@ class WebsiteNormalizer(BaseNormalizer):
             location=location,
             provenance=provenance
         )
-        
-        # Map socials if present in the raw payload (from WebsiteParser)
-        # Note: WebsiteDiscoveryProvider payload often includes a 'social_links' dict
-        socials = payload.get("social_links", {})
+
+        # Map contact fields from the deep scrape payload
+        # Email and phone are already validated by the scraping logic
+        if payload.get("email"):
+            lead.emails = [payload["email"]]
+        if payload.get("phone"):
+            lead.phones = [payload["phone"]]
+
+        # Map social profiles - the field from scrape_site is "socials" not "social_links"
+        socials = payload.get("socials", {})
         if socials:
             lead.socials = socials
 

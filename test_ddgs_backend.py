@@ -22,7 +22,7 @@ def test_canonical_schema():
     backend = DDGSBackend()
     
     # Mock the DDGS text method to return predictable data
-    with patch("duckduckgo_search.DDGS.text") as mock_text:
+    with patch("ddgs.DDGS.text") as mock_text:
         mock_text.return_value = [
             {"title": "Test Title", "href": "https://test.com", "body": "Test snippet"}
         ]
@@ -42,7 +42,7 @@ def test_search_service_integration():
     print("Testing SearchService integration with DDGS...")
     service = SearchService() # Uses default_factory
     
-    with patch("duckduckgo_search.DDGS.text") as mock_text:
+    with patch("ddgs.DDGS.text") as mock_text:
         mock_text.return_value = [
             {"title": "Integrated Title", "href": "https://integrated.com", "body": "Integrated snippet"}
         ]
@@ -58,7 +58,7 @@ def test_empty_results_handling():
     print("Testing empty results handling...")
     backend = DDGSBackend()
     
-    with patch("duckduckgo_search.DDGS.text") as mock_text:
+    with patch("ddgs.DDGS.text") as mock_text:
         mock_text.return_value = [] # No results found
         
         results = backend.search("nothing", limit=10)

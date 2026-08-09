@@ -16,7 +16,6 @@ from .query import DiscoveryQuery, DiscoveryBatch
 from .registry import ProviderRegistry, default_registry
 from .normalizers.registry import default_registry as normalizer_registry
 
-
 # ---------------------------------------------------------------------------
 # Summary value objects
 # ---------------------------------------------------------------------------
@@ -43,6 +42,8 @@ class DiscoveryRunSummary:
     total_new: int = 0
     per_source: Dict[str, SourceRunSummary] = field(default_factory=dict)
     leads: List[UnifiedLead] = field(default_factory=list)
+    # Phase 18C — populated after dedupe‑and‑score.  Each element is a ScoredLead.
+    scored_leads: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -189,15 +190,31 @@ class LeadDiscoveryEngine:
                         except Exception as web_exc:
                             print(f"Website enrichment phase failed: {web_exc}")
 
-
                 if batch.meta:
                     src_summary.next_cursor = batch.next_cursor
 
                 summary.per_source[source_name] = src_summary
-
-                # Accumulate totals on the run-level summary
+                # Accumulate totals on the run-level summary (raw counts)
                 summary.total_found += src_summary.found
                 summary.total_new += 0  # placeholder for future dedupe
                 summary.leads.extend([])  # placeholder for future dedupe
+
+        # ------------------------------------------------------------------
+        # 5. Deduplication (Phase 18B)
+        # ------------------------------------------------------------------
+        from scraper.deduplication.deduper import LeadDeduper
+        deduper = LeadDeduper()
+        deduped_leads = deduper.deduplicate(summary.leads)
+        summary.leads = deduped_leads
+        summary.total_new = len(deduped_leads)
+        # ``total_found`` already reflects the raw number of candidates; we keep
+        # it unchanged because it represents discovery volume before dedup.
+
+        # ------------------------------------------------------------------
+        # 6. Lead Scoring (Phase 18C)
+        # ------------------------------------------------------------------
+        from scraper.scoring.scoring_service import LeadScoringService
+        scoring_service = LeadScoringService()
+        summary.scored_leads = scoring_service.score(deduped_leads)
 
         return summary

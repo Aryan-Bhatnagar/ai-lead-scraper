@@ -9,7 +9,7 @@ They contain no I/O and no business logic.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, Dict, List, Optional
 
 
@@ -35,7 +35,7 @@ class RawCandidate:
 
     payload: Dict[str, Any] = field(default_factory=dict)
     source: str = ""
-    fetched_at: Optional[datetime] = None
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass
@@ -57,4 +57,4 @@ class DiscoveryBatch:
     candidates: List[RawCandidate] = field(default_factory=list)
     next_cursor: Optional[str] = None
     meta: SourceMeta = field(default_factory=SourceMeta)
-    fetched_at: datetime = field(default_factory=datetime.utcnow)
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))

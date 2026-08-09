@@ -1,0 +1,102 @@
+import { useCallback } from 'react'
+import useQuery, { invalidateCache } from './useQuery'
+import { searchLeads, getLeads, deleteLead, updateLeadLifecycle } from '../services/leadsService'
+import { mapApiLead } from '../services/adapters'
+
+/**
+ * useLeads
+ * --------
+ * Server-driven lead repository hook.
+ *
+ * @param {Object} options
+ * @param {string} options.search        - free-text (company/website/email/city…)
+ * @param {string} options.source        - source filter (substring of source_url)
+ * @param {string} options.lifecycle     - lead_status filter
+ * @param {string} options.country       - country exact match
+ * @param {string} options.city          - city exact match
+ * @param {string} options.quality       - data_quality exact match
+ * @param {string} options.sortBy        - backend sort field (quality_score, company_name…)
+ * @param {boolean} options.sortDesc
+ * @param {number} options.limit
+ * @param {number} options.offset
+ */
+export function useLeads({
+  search = '',
+  source = null,
+  lifecycle = null,
+  country = null,
+  city = null,
+  quality = null,
+  sortBy = 'quality_score',
+  sortDesc = true,
+  limit = 8,
+  offset = 0,
+} = {}) {
+  const useFast = !search // join fast list endpoint when not searching
+
+  const query = useQuery({
+    queryKey: useFast
+      ? ['leads', 'list', { source, lifecycle, quality }]
+      : ['leads', 'search', { search, source, lifecycle, country, city, quality, sortBy, sortDesc, limit, offset }],
+    queryFn: async () => {
+      if (useFast) {
+        const params = {}
+        if (source && source !== 'All') params.source = source
+        if (lifecycle && lifecycle !== 'All') params.lead_status = lifecycle
+        if (quality && quality !== 'All') params.data_quality = quality.toUpperCase()
+        const data = await getLeads(params)
+        return { leads: (data.leads || []).map(mapApiLead), total: data.count ?? data.leads?.length ?? 0 }
+      }
+      const filters = {}
+      if (search) filters.search = search
+      if (source && source !== 'All') filters.source = source
+      if (lifecycle && lifecycle !== 'All') filters.lead_status = lifecycle
+      if (country && country !== 'All') filters.country = country
+      if (city && city !== 'All') filters.city = city
+      if (quality && quality !== 'All') filters.quality_tier = quality.toUpperCase()
+      const data = await searchLeads({ filters, sortBy, sortDesc, limit, offset })
+      return {
+        leads: (data.leads || []).map(mapApiLead),
+        total: data.total ?? data.leads?.length ?? 0,
+        limit: data.limit,
+        offset: data.offset,
+      }
+    },
+    ttl: 30_000,
+  })
+
+  const refresh = useCallback(() => {
+    invalidateCache('leads')
+    invalidateCache('analytics')
+    return query.refetch()
+  }, [query])
+
+  return {
+    leads: query.data?.leads ?? [],
+    total: query.data?.total ?? 0,
+    loading: query.loading,
+    error: query.error,
+    refetch: refresh,
+  }
+}
+
+/** All-leads hook used by stat badges and CSV export. */
+export function useAllLeads({ enabled = true } = {}) {
+  const query = useQuery({
+    queryKey: ['leads', 'all'],
+    queryFn: async () => {
+      // High limit so every imported lead is present client-side for
+      // filtering/sorting — the backend otherwise defaults to 50.
+      const data = await getLeads({ limit: 10000, sort: 'id', order: 'desc' })
+      return (data.leads || []).map(mapApiLead)
+    },
+    ttl: 30_000,
+    enabled,
+  })
+  return {
+    leads: query.data ?? [],
+    loading: query.loading,
+    error: query.error,
+    refetch: query.refetch,
+  }
+}
