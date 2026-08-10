@@ -122,3 +122,10 @@ IMPORTER_SUMMARY.md
 
 # Windows AppData
 %LOCALAPPDATA%/
+
+# Claude Code local configuration
+.claude/
+
+# Temporary verification scripts
+finish_crm_verify.py
+test_write.txt
