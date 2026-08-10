@@ -24,6 +24,8 @@ env/
 data/leads.csv
 data/leads.db
 data/leads_*.csv
+data/leads_repo.db
+data/opportunities.json
 
 # Logs
 *.log
@@ -46,4 +48,77 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 
+# Debug / Development artifacts
+debug/
+*_verify.png
+*.png
+debug_*.py
+debug_*.txt
+*_output.txt
+verification_*.txt
+final_*.txt
+output.txt
+
+# Test / Debug scripts (keep test_*.py in api/ and scraper/ but ignore root test scripts)
+test_*.py
+!api/test_*.py
+!scraper/test_*.py
+
+# Check / Diagnose scripts
+check_*.py
+diagnose_*.py
+examine_*.py
+trace_*.py
+
+# Import / Backfill scripts (keep import_package/ but ignore root scripts)
+import_*.py
+backfill_*.py
+rerun_*.py
+rescore_*.py
+deduplicate_*.py
+cleanup_*.py
+
+# Run / Fetch scripts
+run_*.py
+fetch_*.py
+
+# Query / Verify scripts
+query_*.py
+verify_*.py
+
+# Dataset files (generated/exported, not source code)
+dataset_*.json
+
+# Compilation check
+_compile_check.py
+
+# Playwright test
+playwright_test.js
+
+# Version file
+version.txt
+
+# Create debug dir
+create_debug_dir.py
+
+# External directory
+external/
+
+# kilo directory
 .kilo/
+
+# node_modules at root (if any)
+node_modules/
+
+# Package.json at root (if not needed)
+package.json
+
+# Setup script (optional - keep if you want to track it)
+# setup.ps1
+
+# Implementation / Importer summaries
+IMPLEMENTATION_SUMMARY.md
+IMPORTER_SUMMARY.md
+
+# Windows AppData
+%LOCALAPPDATA%/
