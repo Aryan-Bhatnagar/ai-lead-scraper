@@ -682,6 +682,34 @@ ai-lead-scraper/
 
 ---
 
+## Database Handoff
+
+The repository does **NOT** contain the production lead database.
+
+The current CRM database (`data/leads.db`) contains 1,887 leads with full AI enrichment, scoring, and opportunity data. This database must be obtained separately from the project owner — it is intentionally excluded from GitHub because it contains lead/contact data (PII).
+
+### Obtaining the Database
+1. Request the backup files (`leads_backup_*.db` and `opportunities_backup_*.json`) from the project owner via secure file transfer.
+2. Place them in the `backups/` directory (create if needed).
+3. Restore using the provided script:
+   ```powershell
+   .\restore_database.ps1 -BackupFile "backups\leads_backup_20260810_161421.db" -Force
+   ```
+4. Verify the restoration:
+   ```bash
+   python verify_database_backup.py data/leads.db backups/leads_backup_20260810_161421.db data/opportunities.json backups/opportunities_backup_20260810_161421.json
+   ```
+
+### Documentation
+See **docs/DATABASE_HANDOFF.md** for complete details including:
+- Database schema and all preserved fields
+- Backup file locations and SHA-256 checksums
+- Step-by-step restore and verification procedures
+- Lead statistics and quality distributions
+- AI enrichment fields preserved
+
+---
+
 ## n8n Integration Handoff
 
 See **docs/N8N_INTEGRATION_HANDOFF.md** for complete details.

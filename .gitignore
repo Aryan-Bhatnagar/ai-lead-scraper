@@ -129,3 +129,9 @@ IMPORTER_SUMMARY.md
 # Temporary verification scripts
 finish_crm_verify.py
 test_write.txt
+
+# Database backups
+backups/
+
+# Local verification script
+verify_database_backup.py
