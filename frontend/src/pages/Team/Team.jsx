@@ -19,7 +19,7 @@ export default function Team() {
   const fetchTeam = async () => {
     try {
       setLoading(true)
-      const res = await api.get('/team')
+      const res = await api.get('/api/team')
       setTeam(res.data.team || [])
     } catch (err) {
       toast.error('Failed to load team members')
@@ -58,7 +58,7 @@ export default function Team() {
         .map(t => t.strip ? t.strip() : t.trim())
         .filter(Boolean)
 
-      await api.post('/team', {
+      await api.post('/api/team', {
         name: formData.name.trim(),
         role: formData.role.trim() || 'Specialist',
         email: formData.email.trim(),

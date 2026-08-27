@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Search, MapPin, Globe, Cloud, Camera, Zap, ExternalLink, FileText, Sparkles, CheckCircle2, Clock, Hourglass, Send, Code2 } from 'lucide-react'
 import PageHeader from '../../components/layout/PageHeader'
 import EmptyState from '../../components/layout/EmptyState'
@@ -19,7 +19,7 @@ export default function Discover() {
   const [teamMembers, setTeamMembers] = useState([])
 
   useEffect(() => {
-    api.get('/team').then(res => {
+    api.get('/api/team').then(res => {
       setTeamMembers(res.data.team || [])
     }).catch(() => {})
   }, [])
