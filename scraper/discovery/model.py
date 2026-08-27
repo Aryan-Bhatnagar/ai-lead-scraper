@@ -85,6 +85,12 @@ class UnifiedLead:
     address: Optional[str] = None
     google_rating: Optional[float] = None
 
+    # --- Intelligence & AI ---
+    ai_summary: Optional[str] = None
+    outreach_strategy: Optional[str] = None
+    buying_signals: Optional[str] = None
+    recommended_service: Optional[str] = None
+
     # --- Provenance ---
     provenance: Provenance = field(default_factory=Provenance)
 

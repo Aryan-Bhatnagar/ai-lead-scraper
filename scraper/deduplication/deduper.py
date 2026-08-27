@@ -20,6 +20,14 @@ from .models import DedupScore, LeadCluster, DeduplicationReport
 from scraper.discovery.model import UnifiedLead
 
 
+PLATFORM_DOMAINS = {
+    "freelancer.com", "www.freelancer.com",
+    "upwork.com", "www.upwork.com",
+    "instagram.com", "www.instagram.com",
+    "linkedin.com", "www.linkedin.com",
+    "facebook.com", "www.facebook.com"
+}
+
 def _extract_domain(lead: UnifiedLead) -> str | None:
     """Return a normalised domain string for the lead.
 
@@ -27,14 +35,21 @@ def _extract_domain(lead: UnifiedLead) -> str | None:
     * ``canonical_domain`` – already stripped of scheme / sub‑domains.
     * ``website`` – parse out the netloc.
     """
+    domain = None
     if lead.canonical_domain:
-        return lead.canonical_domain.lower()
-    if lead.website:
+        domain = lead.canonical_domain.lower()
+    elif lead.website:
         # naïve extraction – split on '/' and remove protocol if present
         url = lead.website.lower().split("//")[-1]
         domain = url.split("/")[0]
-        return domain
-    return None
+
+    if domain in PLATFORM_DOMAINS:
+        # Don't treat shared job/social platforms as a single business domain!
+        # Return full URL path so distinct job posts and profiles remain distinct.
+        if lead.website:
+            return lead.website.lower().split("//")[-1].rstrip("/")
+        return None
+    return domain
 
 
 def _email_domains(lead: UnifiedLead) -> Set[str]:

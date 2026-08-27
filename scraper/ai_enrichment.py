@@ -108,6 +108,7 @@ class EnrichmentResult:
     opportunity_score: Optional[int] = None
     score_explanation_json: Optional[str] = None
     company_logo: Optional[str] = None
+    has_requirement_evidence: int = 0
 
     # Business profile (from website enrichment)
     business_profile: Optional[Dict[str, Any]] = None
@@ -226,6 +227,7 @@ class AIEnrichmentPipeline:
             result.outreach_strategy = self._derive_outreach_strategy(
                 insights, result.recommended_service, result.decision_maker_guess
             )
+            result.has_requirement_evidence = 1 if (insights.get("requirement_evidence") or []) else 0
 
             # Step 3: Calculate AI Confidence
             result.ai_confidence = self._calculate_ai_confidence(insights, result.business_profile)
@@ -565,8 +567,41 @@ class AIEnrichmentPipeline:
         # ai_enrichment_quality
         extended_ratios["ai_enrichment_quality"] = self._extract_ai_enrichment_quality(insights, profile)
 
+        # intent_evidence_score
+        enable_intent = os.getenv("ENABLE_INTENT_DISCOVERY", "false").lower() in ("true", "1", "t", "yes")
+        if enable_intent:
+            evidence_list = insights.get("requirement_evidence") or []
+            extended_ratios["intent_evidence_score"] = min(len(evidence_list) / 2.0, 1.0)
+
         # Calculate using weight provider (which has extended weights from YAML)
         overall, breakdowns = self.calculator.calculate(extended_ratios)
+
+        if enable_intent:
+            # Competitor Shield & Buyer Verification
+            COMPETITOR_TERMS = [
+                "design agency", "web design company", "web development agency", "it services",
+                "it consulting", "software company", "digital marketing agency", "seo agency",
+                "branding agency", "logo design agency", "freelance designer"
+            ]
+
+            text_to_check = (
+                (lead.company_name or "") + " " +
+                (insights.get("company_summary") or "") + " " +
+                (insights.get("industry_category") or "")
+            ).lower()
+
+            is_competitor = any(term in text_to_check for term in COMPETITOR_TERMS)
+            has_contact_info = bool(
+                getattr(lead, "email", None) or
+                getattr(lead, "phone", None) or
+                (getattr(lead, "emails", None) and len(lead.emails) > 0) or
+                (getattr(lead, "phones", None) and len(lead.phones) > 0)
+            )
+
+            if is_competitor:
+                overall = min(overall, 20)  # Heavy penalty -> DISQUALIFIED
+            elif not has_contact_info:
+                overall = max(0, overall - 25)  # Penalty if missing both email and phone
 
         # Build explanation JSON
         explanation = ScoreExplanation(
@@ -721,6 +756,9 @@ class AIEnrichmentPipeline:
             if result.company_logo is not None:
                 update_fields.append("company_logo = ?")
                 params.append(result.company_logo)
+            if getattr(result, "has_requirement_evidence", None) is not None:
+                update_fields.append("has_requirement_evidence = ?")
+                params.append(result.has_requirement_evidence)
 
             # Always update ai_score (use opportunity_score as ai_score)
             if result.opportunity_score is not None:

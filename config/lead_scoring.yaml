@@ -82,6 +82,12 @@ features:
     description: "Quality/completeness of AI enrichment"
     enabled: true
 
+  # Note: intent_evidence_score is dynamically activated & rebalanced (5.0 weight) by WeightProvider at runtime when ENABLE_INTENT_DISCOVERY=true
+  intent_evidence_score:
+    weight: 0
+    description: "Grounded requirement evidence (dynamically rebalanced at runtime when ENABLE_INTENT_DISCOVERY=true)"
+    enabled: true
+
 # Three-tier quality model: Excellent (>=70), Good (>=50), Average (>=30)
 thresholds:
   excellent: 70

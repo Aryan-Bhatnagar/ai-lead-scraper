@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
+import os
 import yaml
 
 
@@ -71,6 +72,20 @@ class WeightProvider:
         raw_features: Dict[str, Any] = cfg.get("features", {})
         for feat_name, raw in raw_features.items():
             self.weights[feat_name] = FeatureWeight.from_dict(feat_name, raw)
+
+        # Dynamic weight rebalancing gated by ENABLE_INTENT_DISCOVERY
+        enable_intent = os.getenv("ENABLE_INTENT_DISCOVERY", "false").lower() in ("true", "1", "t", "yes")
+        if enable_intent:
+            if "ai_enrichment_quality" in self.weights:
+                self.weights["ai_enrichment_quality"] = FeatureWeight(
+                    feature="ai_enrichment_quality", weight=5.0, description="Quality/completeness of AI enrichment", enabled=True
+                )
+            self.weights["intent_evidence_score"] = FeatureWeight(
+                feature="intent_evidence_score", weight=5.0, description="Grounded requirement evidence", enabled=True
+            )
+        else:
+            if "intent_evidence_score" in self.weights:
+                del self.weights["intent_evidence_score"]
 
         raw_thresholds: Dict[str, Any] = cfg.get("thresholds", {})
         # Three-tier model: Excellent, Good, Average

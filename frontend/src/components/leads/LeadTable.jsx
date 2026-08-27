@@ -1,16 +1,35 @@
-import { Eye, Trash2 } from 'lucide-react'
+import { Eye, Trash2, Send } from 'lucide-react'
 import OpportunityScoreBadge from '../intelligence/OpportunityScoreBadge'
 import { calculateOpportunityScore } from '../../services/opportunityIntelligence'
-
+import api from '../../services/api'
+import toast from 'react-hot-toast'
 
 export default function LeadTable({ leads, onView, onDelete }) {
   if (leads.length === 0) return null
+
+  const handleEnqueueLead = async (lead) => {
+    const channel = lead.email ? 'EMAIL' : lead.phone ? 'WHATSAPP' : null
+    if (!channel) {
+      toast.error('Lead has neither email nor phone number')
+      return
+    }
+    try {
+      await api.post('/api/outreach', {
+        lead_id: lead.id,
+        outreach_channel: channel,
+      })
+      toast.success(`Queued #${lead.id} (${lead.company_name || 'Lead'}) for ${channel} outreach!`)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to queue lead for outreach')
+    }
+  }
 
   return (
     <div className="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className="bg-slate-50 border-b border-slate-200">
+            <th className="px-4 py-3 text-sm font-semibold text-slate-600"># ID</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Company</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Website</th>
             <th className="px-4 py-3 text-sm font-semibold text-slate-600">Industry</th>
@@ -27,6 +46,9 @@ export default function LeadTable({ leads, onView, onDelete }) {
               key={lead.id}
               className="hover:bg-slate-50 transition-colors group"
             >
+              <td className="px-4 py-3 text-xs font-mono font-bold text-indigo-600">
+                #{lead.id}
+              </td>
               <td className="px-4 py-3 text-sm font-medium text-slate-800 truncate max-w-[200px]">
                 {lead.company_name || 'N/A'}
               </td>
@@ -47,22 +69,31 @@ export default function LeadTable({ leads, onView, onDelete }) {
                 {lead.email || 'N/A'}
               </td>
               <td className="px-4 py-3 text-sm text-slate-600">
-                {lead.city ? `${lead.city}, ${lead.country}` : 'N/A'}
+                {lead.city ? `${lead.city}, ${lead.country || ''}` : lead.country || 'N/A'}
               </td>
               <td className="px-4 py-3 text-sm">
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  lead.lead_status === 'Enriched'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-blue-100 text-blue-700'
+                  lead.lead_status === 'CONTACTED'
+                    ? 'bg-blue-100 text-blue-800'
+                    : lead.lead_status === 'INTERESTED'
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-slate-100 text-slate-700'
                 }`}>
                   {lead.lead_status || 'New'}
                 </span>
               </td>
               <td className="px-4 py-3 text-sm text-right">
-                <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleEnqueueLead(lead)}
+                    className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                    title="Queue for Outreach"
+                  >
+                    <Send size={16} />
+                  </button>
                   <button
                     onClick={() => onView(lead)}
-                    className="p-1.5 text-slate-500 hover:text-primary-600 hover:bg-primary-50 rounded-md transition-colors"
+                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
                     title="View Details"
                   >
                     <Eye size={16} />

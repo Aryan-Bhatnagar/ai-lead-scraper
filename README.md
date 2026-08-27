@@ -8,11 +8,12 @@
 
 The AI Lead Scraper CRM is a complete lead management platform that:
 
-1. **Discovers leads** from multiple sources: Google Maps (via Gosom scraper), Google Search, Upwork, and imported datasets (Apollo, Google Places, Upwork exports)
+1. **Discovers leads** from multiple sources: Real-time Multi-Job engines (Freelancer.com REST API with Must-Have Skills, Upwork, Guru.com, PeoplePerHour, LinkedIn Active Jobs), Google Maps Scraper Kit, and imported datasets
 2. **Enriches leads** by scraping company websites and using local LLMs (Ollama) to generate business intelligence
-3. **Scores leads** with a transparent, configurable algorithm producing opportunity scores (0-100) and quality tiers (Excellent/Good/Average)
-4. **Provides a CRM** with dashboard, lead repository, analytics, and opportunity management
-5. **Exposes a REST API** for integration with external tools (e.g., n8n for outreach automation)
+3. **Assigns work to team members** by expertise domain (**Design**, **Development**, **Content**) with automatic transition to **`QUALIFIED`** lifecycle status
+4. **Scores leads** with a transparent, configurable algorithm producing opportunity scores (0-100) and quality tiers (Excellent/Good/Average)
+5. **Provides a CRM** with dashboard, lead repository, team management, analytics, and engagement queue
+6. **Exposes a REST API** for integration with external tools (e.g., n8n for outreach automation)
 
 **Key philosophy**: Local-first, privacy-respecting, no mandatory external API keys. Everything runs on your machine.
 
@@ -20,11 +21,23 @@ The AI Lead Scraper CRM is a complete lead management platform that:
 
 ## Features
 
-### Lead Discovery
-- **Google Maps** — Real business listings via Gosom Google Maps Scraper (Docker)
-- **Google Search** — Free web search via DuckDuckGo backend
-- **Upwork** — Job postings as business opportunities
-- **Dataset Imports** — Apollo, Google Places, Upwork JSON exports
+### Lead Discovery & Multi-Job Engines
+- **Freelancer.com** — Live REST API with real client budgets, project descriptions, proposal counts, posted times, and **Must-Have Skills & Tech Stack** extraction
+- **Upwork** — Direct targeted live stream (`site:upwork.com/freelance-jobs/apply/`) extracting 10–15 individual buyer client jobs with budgets and apply links
+- **Guru.com** — Direct targeted live stream (`site:guru.com/jobs/`) extracting 10–15 individual buyer client jobs with budgets and apply links
+- **PeoplePerHour** — Direct targeted live stream (`site:peopleperhour.com/job/`) extracting 10–15 individual buyer client jobs with budgets and apply links
+- **LinkedIn Active Jobs** — Targeted live stream (`site:linkedin.com/jobs/view/`) extracting fresh active company job postings
+- **Google Maps** — Real business listings via 3-tiered Google Maps Scraper Kit
+
+### Team & Work Assignment System (`/team`)
+- **Employee Roster** — Manage company team members categorized by expertise domains (**Design**, **Development**, **Content**)
+- **Direct Work Assignment** — Assign leads directly from `/discover` cards or `/leads` database table with automatic transition to **`QUALIFIED`** status
+- **Assigned Workload Tracking** — Real-time tracking of active lead assignments per employee
+
+### Contact Discovery & Persistence
+- SQLite contact extraction persistence (`UPDATE leads SET email = ?, lead_status = 'QUALIFIED'`)
+- Automatic exclusion of freelance platform links from candidate queue
+- Default CRM sorting to newest leads first (`scraped_at DESC`)
 
 ### Lead Enrichment
 - Website scraping with BeautifulSoup + ScrapeGraphAI

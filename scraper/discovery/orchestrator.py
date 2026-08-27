@@ -36,11 +36,14 @@ logger = logging.getLogger(__name__)
 # Ordered list of built-in providers (highest priority first).
 # This is the default execution order when the user does not supply one.
 DEFAULT_PROVIDER_ORDER: List[str] = [
+    "freelancer",
+    "upwork",
+    "google_maps",
+    "instagram",
+    "linkedin",
     "google_search",
     "website_discovery",
-    "google_maps",
     "google_maps_scraper_kit",
-    "upwork",
 ]
 
 

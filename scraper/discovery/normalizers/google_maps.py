@@ -31,7 +31,7 @@ class GoogleMapsNormalizer(BaseNormalizer):
 
         provenance = Provenance(
             source=candidate.source,
-            source_url=payload.get("google_maps_url"),
+            source_url=payload.get("source_url") or payload.get("google_maps_url") or payload.get("website"),
             discovered_at=datetime.now(UTC),
             discovery_query={"industry": query.industry, "location": query.location},
             raw_ref=payload.get("place_id"),

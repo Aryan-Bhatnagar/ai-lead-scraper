@@ -93,9 +93,12 @@ class LegacyLeadPersistenceAdapter:
         if unified_lead.socials:
             import json
             legacy_data["socials_json"] = json.dumps(unified_lead.socials)
-        # Provenance: we can store the source URL in source_url
-        if unified_lead.provenance and unified_lead.provenance.source_url:
-            legacy_data["source_url"] = unified_lead.provenance.source_url
+        # Provenance: store source and source URL
+        if unified_lead.provenance:
+            if unified_lead.provenance.source:
+                legacy_data["source"] = unified_lead.provenance.source
+            if unified_lead.provenance.source_url:
+                legacy_data["source_url"] = unified_lead.provenance.source_url
         # Set scraped_at to now if not provided
         from datetime import datetime, timezone
         if unified_lead.provenance and unified_lead.provenance.discovered_at:
@@ -104,6 +107,16 @@ class LegacyLeadPersistenceAdapter:
             legacy_data["scraped_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         # Status: we can set a default scraper status, e.g., "pending" or "new"
         legacy_data["status"] = "pending"
+        # AI & Intelligence fields from UnifiedLead
+        if getattr(unified_lead, "ai_summary", None):
+            legacy_data["ai_summary"] = unified_lead.ai_summary
+        if getattr(unified_lead, "outreach_strategy", None):
+            legacy_data["outreach_strategy"] = unified_lead.outreach_strategy
+        if getattr(unified_lead, "buying_signals", None):
+            legacy_data["buying_signals"] = unified_lead.buying_signals
+        if getattr(unified_lead, "recommended_service", None):
+            legacy_data["recommended_service"] = unified_lead.recommended_service
+
         # Enriched fields from UnifiedLead (Google Maps data)
         if unified_lead.maps_rating is not None:
             legacy_data["google_rating"] = unified_lead.maps_rating

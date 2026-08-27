@@ -150,12 +150,12 @@ class LeadDiscoveryEngine:
                 # --------------------------------------------------------------
                 # 4. Secondary Enrichment (Website Discovery)
                 # --------------------------------------------------------------
-                # If we discovered leads that have websites, we can now trigger
-                # the WebsiteDiscoveryProvider to perform deep scraping.
-                # Note: WebsiteDiscoveryProvider.discover() takes a DiscoveryQuery
-                # with target_websites in filters.
-
-                websites_to_enrich = [l.website for l in summary.leads if l.website]
+                # If we discovered leads that have non-platform websites, perform deep scraping.
+                platform_domains = {"freelancer.com", "upwork.com", "guru.com", "linkedin.com", "instagram.com", "facebook.com"}
+                websites_to_enrich = [
+                    l.website for l in summary.leads 
+                    if l.website and not any(p in l.website.lower() for p in platform_domains)
+                ]
                 if websites_to_enrich:
                     enrichment_query = DiscoveryQuery(
                         industry=query.industry,

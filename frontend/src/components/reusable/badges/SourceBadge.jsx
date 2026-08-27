@@ -9,6 +9,10 @@ const SOURCE_META = {
 
   // Freelance platforms
   'Upwork': { icon: BriefcaseBusiness, classes: 'bg-green-50 text-green-700 ring-green-600/20 dark:bg-green-500/10 dark:text-green-400 dark:ring-green-500/20' },
+  'Freelancer': { icon: BriefcaseBusiness, classes: 'bg-sky-50 text-sky-700 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-400 dark:ring-sky-500/20' },
+  'Guru': { icon: Globe, classes: 'bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20' },
+  'LinkedIn': { icon: Users, classes: 'bg-blue-50 text-blue-700 ring-blue-600/20 dark:bg-blue-500/10 dark:text-blue-400 dark:ring-blue-500/20' },
+  'PeoplePerHour': { icon: Globe, classes: 'bg-purple-50 text-purple-700 ring-purple-600/20 dark:bg-purple-500/10 dark:text-purple-400 dark:ring-purple-500/20' },
 
   // Data providers
   'Apollo': { icon: Users, classes: 'bg-pink-50 text-pink-700 ring-pink-600/20 dark:bg-pink-500/10 dark:text-pink-400 dark:ring-pink-500/20' },

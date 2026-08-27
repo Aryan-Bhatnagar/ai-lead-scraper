@@ -180,10 +180,19 @@ def enrich_email_for_lead(lead: Dict[str, Any]) -> Dict[str, Any]:
         result["pages_checked"] = pages_checked
         return result
 
-    # No email on homepage — discover internal pages
-    extra_pages = discover_pages(website, html)
+    # Deep Contact Crawler: No email on homepage — construct standard contact paths + discover internal pages
+    from urllib.parse import urljoin
+    standard_paths = ["/contact", "/contact-us", "/about-us", "/about"]
+    candidate_urls = [urljoin(website, path) for path in standard_paths]
+    
+    discovered_urls = discover_pages(website, html)
+    for u in discovered_urls:
+        if u not in candidate_urls and u != website:
+            candidate_urls.append(u)
 
-    for page_url in extra_pages:
+    for page_url in candidate_urls:
+        if page_url in pages_checked:
+            continue
         try:
             page_html = fetch_html(page_url)
         except Exception:
@@ -207,10 +216,12 @@ def enrich_email_for_lead(lead: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 def extract_emails_batch(
     leads: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    """Extract emails for a batch of leads, deduplicating by website.
+    """Extract emails for a batch of leads in parallel, deduplicating by website.
 
     Parameters
     ----------
@@ -224,24 +235,44 @@ def extract_emails_batch(
         Duplicate websites within the batch are fetched only once.
     """
     enriched_cache: Dict[str, Dict[str, Any]] = {}
-    results: List[Dict[str, Any]] = []
+    unique_websites: Dict[str, Dict[str, Any]] = {}
 
     for lead in leads:
         if not isinstance(lead, dict):
             continue
+        website = lead.get("website")
+        if website and isinstance(website, str):
+            norm_website = _normalize_url_for_dedup(website)
+            if norm_website and norm_website not in unique_websites:
+                unique_websites[norm_website] = lead
 
+    # Fetch unique websites in parallel using ThreadPoolExecutor
+    if unique_websites:
+        with ThreadPoolExecutor(max_workers=min(8, len(unique_websites))) as executor:
+            future_to_norm = {
+                executor.submit(enrich_email_for_lead, sample_lead): norm_url
+                for norm_url, sample_lead in unique_websites.items()
+            }
+            for future in as_completed(future_to_norm):
+                norm_url = future_to_norm[future]
+                try:
+                    enriched_cache[norm_url] = future.result()
+                except Exception:
+                    enriched_cache[norm_url] = {
+                        "email": "", "email_source_page": "", "email_source_type": "", "pages_checked": []
+                    }
+
+    results: List[Dict[str, Any]] = []
+    for lead in leads:
+        if not isinstance(lead, dict):
+            continue
         website = lead.get("website")
         if not website or not isinstance(website, str):
             results.append({**lead})
             continue
 
         norm_website = _normalize_url_for_dedup(website)
-
-        if norm_website in enriched_cache:
-            enriched_data = enriched_cache[norm_website]
-        else:
-            enriched_data = enrich_email_for_lead(lead)
-            enriched_cache[norm_website] = enriched_data
+        enriched_data = enriched_cache.get(norm_website, {})
 
         # Merge: preserve original lead fields, overlay email fields
         merged = dict(lead)

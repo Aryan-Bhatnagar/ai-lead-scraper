@@ -58,6 +58,33 @@ class FeatureExtractor:
     # ------------------------------------------------------------------
     def extract_all(self, lead: UnifiedLead) -> dict[str, float]:
         """Return a dict mapping feature_name → quality_ratio for all features."""
+        source_str = ((lead.provenance.source if lead.provenance else "") or getattr(lead, "source", "") or "").lower()
+        web_str = (lead.website or "").lower()
+        is_active_marketplace_lead = (
+            "freelancer" in source_str or "freelancer" in web_str or
+            "upwork" in source_str or "upwork" in web_str or
+            "guru" in source_str or "guru" in web_str
+        )
+
+        if is_active_marketplace_lead:
+            return {
+                "website_exists": 1.0 if lead.website else 0.8,
+                "business_email": 1.0,  # Active buyer opportunity
+                "phone_number": 1.0,   # Active buyer contact portal
+                "description_quality": max(0.9, self.description_quality(lead)),
+                "location_quality": max(0.8, self.location_quality(lead)),
+                "multiple_sources": 1.0,
+                "social_profiles": 1.0,
+                "company_size_hints": max(0.8, self.company_size_hints(lead)),
+                "recent_activity": 1.0,
+                "provider_confidence": 1.0,
+                "ai_enrichment_confidence": 1.0,
+                "google_rating": 1.0,
+                "review_count": 1.0,
+                "company_size": 1.0,
+                "ai_enrichment_quality": 1.0,
+            }
+
         return {
             "website_exists": self.website_exists(lead),
             "business_email": self.business_email(lead),
