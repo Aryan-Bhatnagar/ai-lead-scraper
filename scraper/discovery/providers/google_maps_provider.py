@@ -61,7 +61,7 @@ def fetch_google_maps_leads(service: str, location: str, max_results: int = 10) 
                             phone = d_res.get('formatted_phone_number', '')
                             website = d_res.get('website', maps_link)
 
-                    audit = audit_website(website)
+                    pitch = "Verified local business listing."
                     leads.append({
                         "company": f"Google Maps Business: {name}",
                         "company_name": name,
@@ -77,7 +77,7 @@ def fetch_google_maps_leads(service: str, location: str, max_results: int = 10) 
                         "source_url": maps_link,
                         "has_website": "Verified Business Page ↗" if website != maps_link else "Google Maps Listing ↗",
                         "lead_type": "Genuine Local Business Client",
-                        "website_flaws": audit.get("pitch_snippet", "Local business listing"),
+                        "website_flaws": pitch,
                         "description": f"Verified Local Business in {location}: '{name}'. Address: {address}. Phone: {phone or 'N/A'}.",
                         "summary": f"Verified Local Business in {location}: '{name}'. Address: {address}. Phone: {phone or 'N/A'}.",
                         "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -101,7 +101,7 @@ def fetch_google_maps_leads(service: str, location: str, max_results: int = 10) 
                     website = r.get('website', '')
                     place_link = r.get('link', 'https://maps.google.com')
 
-                    audit = audit_website(website) if website else {}
+                    pitch = "Verified local business listing."
                     leads.append({
                         "company": f"Google Maps Business: {name}",
                         "company_name": name,
@@ -117,7 +117,7 @@ def fetch_google_maps_leads(service: str, location: str, max_results: int = 10) 
                         "source_url": place_link,
                         "has_website": "Verified Business Page ↗" if website else "Google Maps Listing ↗",
                         "lead_type": "Genuine Local Business Client",
-                        "website_flaws": audit.get("pitch_snippet", "Local business listing"),
+                        "website_flaws": pitch,
                         "description": f"Verified Local Business in {location}: '{name}'. Address: {address}. Phone: {phone or 'N/A'}.",
                         "summary": f"Verified Local Business in {location}: '{name}'. Address: {address}. Phone: {phone or 'N/A'}.",
                         "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -151,7 +151,12 @@ def fetch_google_maps_leads(service: str, location: str, max_results: int = 10) 
             email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', clean_s + " " + clean_t)
             email = email_match.group(0) if email_match else "Direct Business Contact"
 
-            audit = audit_website(actual_url)
+            # Fast static URL audit for discovery speed
+            flaws = []
+            if not actual_url.startswith("https://"):
+                flaws.append("Unsecure HTTP")
+            pitch = "Verified local business. Contact directly for services."
+            
             leads.append({
                 "company": f"Local Business: {clean_t[:35]}",
                 "company_name": clean_t,
@@ -167,7 +172,7 @@ def fetch_google_maps_leads(service: str, location: str, max_results: int = 10) 
                 "source_url": actual_url,
                 "has_website": "Official Business Website ↗",
                 "lead_type": "Genuine Local Business Client",
-                "website_flaws": audit.get("pitch_snippet", "Local business website audit completed"),
+                "website_flaws": pitch,
                 "description": f"Verified Local Business in {location}: '{clean_t}'. Details: {clean_s[:120]}...",
                 "summary": f"Verified Local Business in {location}: '{clean_t}'. Details: {clean_s[:120]}...",
                 "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")

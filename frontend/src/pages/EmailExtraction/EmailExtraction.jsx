@@ -30,12 +30,12 @@ export default function EmailExtraction() {
       const response = await fetch('/api/leads')
       if (!response.ok) throw new Error('Failed to fetch candidates')
       const data = await response.json()
-      // Candidates: have website but no email (excluding Freelancer project links)
+      // Candidates: have website but no real valid '@' email (excluding freelance job platform links)
       const eligible = (data.leads || []).filter(l => 
         l.website && 
-        !l.email && 
-        (l.source || '').toLowerCase() !== 'freelancer' &&
-        !l.website.includes('freelancer.com')
+        !(l.email && l.email.includes('@')) &&
+        !['freelancer', 'upwork', 'guru', 'peopleperhour', 'linkedin'].includes((l.source || '').toLowerCase()) &&
+        !['freelancer.com', 'upwork.com', 'guru.com', 'peopleperhour.com', 'linkedin.com'].some(d => (l.website || '').toLowerCase().includes(d))
       )
       setCandidates(eligible)
     } catch (err) {
