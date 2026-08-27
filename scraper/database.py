@@ -79,6 +79,7 @@ LEAD_COLUMNS = [
     "opportunity_score",
     "score_explanation_json",
     "company_logo",
+    "has_requirement_evidence",
 ]
 
 # CRM lead lifecyle statuses – independent of the scraper ``status`` field.
@@ -226,15 +227,16 @@ def utc_now() -> str:
 def get_connection(db_path: Path | str = DB_PATH):
     """Connection context manager.
 
-    * Enables foreign‑key constraints.
+    * Enables foreign‑key constraints and 30s busy timeout to prevent SQLite lock contention.
     * Returns ``sqlite3.Row`` objects for dict‑like access.
     * Commits on success, rolls back on exception.
     """
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
     try:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
         yield conn
         conn.commit()
     except Exception:
@@ -303,6 +305,7 @@ def initialize_database(db_path: Path | str = DB_PATH) -> None:
             ("opportunity_score", "INTEGER"),
             ("score_explanation_json", "TEXT"),
             ("company_logo", "TEXT"),
+            ("has_requirement_evidence", "INTEGER DEFAULT 0"),
         ]
         for col_name, col_type in phase1_columns:
             if col_name not in cols:
@@ -322,6 +325,68 @@ def initialize_database(db_path: Path | str = DB_PATH) -> None:
         for idx_name, col_name in phase1_indexes:
             if col_name in cols:
                 conn.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON leads({col_name})")
+
+        # Ensure outreach_step column exists in outreach_queue
+        cur = conn.execute("PRAGMA table_info(outreach_queue)")
+        oq_cols = {row["name"] for row in cur.fetchall()}
+        if oq_cols and "outreach_step" not in oq_cols:
+            conn.execute("ALTER TABLE outreach_queue ADD COLUMN outreach_step INTEGER NOT NULL DEFAULT 1")
+
+        # Ensure outreach_logs table exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS outreach_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lead_id INTEGER NOT NULL,
+                queue_id INTEGER,
+                outreach_step INTEGER NOT NULL DEFAULT 1,
+                outreach_channel TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                message_snippet TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE
+            )
+        """)
+
+        # Ensure team_members table exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS team_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE,
+                role TEXT,
+                domains TEXT NOT NULL,
+                expertise_tags TEXT,
+                status TEXT DEFAULT 'ACTIVE',
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        # Add assignment columns to leads table if missing
+        assignment_columns = [
+            ("assigned_member_id", "INTEGER"),
+            ("assigned_member_name", "TEXT"),
+            ("assigned_member_domain", "TEXT"),
+            ("assigned_at", "TEXT"),
+            ("assignment_notes", "TEXT")
+        ]
+        for col_name, col_type in assignment_columns:
+            if col_name not in cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col_name} {col_type}")
+
+        # Seed demo team members if team_members is empty
+        cur_tm = conn.execute("SELECT COUNT(*) as cnt FROM team_members")
+        if cur_tm.fetchone()["cnt"] == 0:
+            demo_members = [
+                ("Rahul Sharma", "rahul@bilvaleaf.com", "Fullstack Developer", '["Development"]', '["React.js", "Node.js", "Python", "Fullstack"]', "ACTIVE", utc_now()),
+                ("Ananya Verma", "ananya@bilvaleaf.com", "Lead UI/UX & Frontend Engineer", '["Design", "Development"]', '["UI/UX", "Figma", "React", "Frontend", "Logo Design"]', "ACTIVE", utc_now()),
+                ("Vikram Malhotra", "vikram@bilvaleaf.com", "DevOps & Cloud Architect", '["Development"]', '["DevOps", "Docker", "Kubernetes", "AWS", "CI/CD"]', "ACTIVE", utc_now()),
+                ("Priya Patel", "priya@bilvaleaf.com", "Senior Content Specialist", '["Content"]', '["Copywriting", "SEO Writing", "Content Strategy"]', "ACTIVE", utc_now()),
+                ("Amit Kumar", "amit@bilvaleaf.com", "Senior Graphic Designer", '["Design"]', '["Logo Design", "Graphic Design", "Branding", "Illustrator"]', "ACTIVE", utc_now())
+            ]
+            conn.executemany("""
+                INSERT INTO team_members (name, email, role, domains, expertise_tags, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, demo_members)
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +451,12 @@ def get_outreach_entries(
     lead_id: int | None = None,
     outreach_channel: str | None = None,
     outreach_status: str | None = None,
+    outreach_step: int | None = None,
+    source: str | None = None,
+    industry: str | None = None,
+    quality_tier: str | None = None,
+    date_preset: str | None = None,
+    search: str | None = None,
 ) -> list[dict]:
     """Return outreach queue rows optionally filtered by the given parameters.
 
@@ -393,7 +464,7 @@ def get_outreach_entries(
     """
     # Base query selects all outreach_queue columns plus lead fields.
     query = """
-        SELECT oq.*, l.company_name, l.email, l.phone
+        SELECT oq.*, l.company_name, l.contact_name, l.email, l.phone, l.source, l.industry, l.quality_tier, l.created_at as lead_created_at
         FROM outreach_queue oq
         LEFT JOIN leads l ON oq.lead_id = l.id
     """
@@ -402,14 +473,58 @@ def get_outreach_entries(
     if lead_id is not None:
         clauses.append("oq.lead_id = ?")
         params.append(lead_id)
-    if outreach_channel is not None:
+    if outreach_channel is not None and outreach_channel != "ALL":
         clauses.append("oq.outreach_channel = ?")
         params.append(outreach_channel)
-    if outreach_status is not None:
+    if outreach_status is not None and outreach_status != "ALL":
         clauses.append("oq.outreach_status = ?")
         params.append(outreach_status)
+    if outreach_step is not None:
+        clauses.append("oq.outreach_step = ?")
+        params.append(outreach_step)
+    if source is not None and source != "ALL":
+        clauses.append("l.source = ?")
+        params.append(source)
+    if industry is not None and industry != "ALL":
+        ind_map = {
+            "Healthcare & Medical": ["hospital", "medical", "clinic", "doctor", "health", "physician", "pediatric", "dermatologist", "optician", "surgeon", "pathologist", "imaging"],
+            "Dental & Oral Care": ["dentist", "dental", "orthodontist", "endodontist", "periodontist"],
+            "IT & Software": ["software", "it ", "information technology", "web", "app", "devops", "cloud", "data", "tech", "computer", "analytics", "ai ", "artificial intelligence"],
+            "Marketing & Advertising": ["marketing", "advertising", "seo", "media", "brand", "digital marketing", "pr "],
+            "Finance & Accounting": ["finance", "financial", "accounting", "accountant", "fintech", "banking", "tax", "audit", "investment"],
+            "Real Estate & Construction": ["real estate", "construction", "property", "building", "architect", "contractor"],
+            "Education & Training": ["school", "education", "college", "university", "coaching", "training", "learning", "academy"],
+            "Beauty & Wellness": ["salon", "spa", "beauty", "fitness", "gym", "wellness", "massage", "tattoo"],
+            "Food & Hospitality": ["restaurant", "food", "cafe", "hotel", "catering", "beverage", "bakery"],
+            "Legal & Professional Services": ["legal", "lawyer", "attorney", "consulting", "consultant", "bpo", "kpo", "advisory"]
+        }
+        if industry in ind_map:
+            sub_clauses = ["LOWER(l.industry) LIKE ?" for _ in ind_map[industry]]
+            clauses.append("(" + " OR ".join(sub_clauses) + ")")
+            params.extend([f"%{k}%" for k in ind_map[industry]])
+        else:
+            clauses.append("(l.industry = ? OR LOWER(l.industry) LIKE ?)")
+            params.extend([industry, f"%{industry.lower()}%"])
+    if quality_tier is not None and quality_tier != "ALL":
+        clauses.append("LOWER(l.quality_tier) = LOWER(?)")
+        params.append(quality_tier)
+    if date_preset is not None and date_preset != "ALL":
+        dp = date_preset.upper()
+        if dp == "TODAY":
+            clauses.append("DATE(l.created_at) = DATE('now')")
+        elif dp == "LAST_7_DAYS":
+            clauses.append("l.created_at >= DATETIME('now', '-7 days')")
+        elif dp == "LAST_30_DAYS":
+            clauses.append("l.created_at >= DATETIME('now', '-30 days')")
+    if search:
+        s_pattern = f"%{search.strip()}%"
+        clauses.append("(l.company_name LIKE ? OR l.contact_name LIKE ? OR l.email LIKE ? OR l.phone LIKE ? OR CAST(oq.id AS TEXT) LIKE ?)")
+        params.extend([s_pattern, s_pattern, s_pattern, s_pattern, s_pattern])
+
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY oq.id DESC"
+
     with get_connection(db_path) as conn:
         cursor = conn.execute(query, params)
         rows = cursor.fetchall()
@@ -617,7 +732,38 @@ def upsert_lead(lead: dict, db_path: Path | str = DB_PATH) -> int:
         row = conn.execute(
             "SELECT id FROM leads WHERE source_url = ?", (values["source_url"],)
         ).fetchone()
-        return row["id"]
+        lead_id = row["id"]
+
+    try:
+        export_tri_layer_snapshot(db_path)
+    except Exception:
+        pass
+
+    return lead_id
+
+def export_tri_layer_snapshot(db_path: Path | str = DB_PATH) -> None:
+    """Synchronizes SQLite database contents into data/leads.json and data/leads.csv."""
+    try:
+        leads = get_all_leads(db_path)
+        out_dir = Path(db_path).parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 1. JSON Export
+        json_path = out_dir / "leads.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(leads, f, indent=2, default=str)
+            
+        # 2. CSV Export
+        import csv
+        csv_path = out_dir / "leads.csv"
+        if leads:
+            fieldnames = list(leads[0].keys())
+            with open(csv_path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(leads)
+    except Exception as err:
+        print(f"[TriLayerExport] Snapshot warning: {err}")
 
 
 def get_lead_by_source_url(source_url: str, db_path: Path | str = DB_PATH) -> dict | None:
@@ -824,3 +970,122 @@ def get_job_items(job_id: int, db_path: Path | str = DB_PATH) -> list[dict]:
             (job_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def log_outreach_event(
+    lead_id: int,
+    queue_id: int | None,
+    outreach_step: int,
+    outreach_channel: str,
+    event_type: str,
+    message_snippet: str | None = None,
+    db_path: Path | str = DB_PATH,
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Log an outreach event (DISPATCHED, SENT, FAILED, REPLY_RECEIVED) to outreach_logs."""
+    now = utc_now()
+    if conn is not None:
+        cur = conn.execute(
+            """
+            INSERT INTO outreach_logs (
+                lead_id, queue_id, outreach_step, outreach_channel, event_type, message_snippet, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (lead_id, queue_id, outreach_step, outreach_channel, event_type, message_snippet, now),
+        )
+        return cur.lastrowid
+    else:
+        with get_connection(db_path) as c:
+            cur = c.execute(
+                """
+                INSERT INTO outreach_logs (
+                    lead_id, queue_id, outreach_step, outreach_channel, event_type, message_snippet, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (lead_id, queue_id, outreach_step, outreach_channel, event_type, message_snippet, now),
+            )
+            return cur.lastrowid
+
+
+def get_outreach_logs_for_lead(lead_id: int, db_path: Path | str = DB_PATH) -> list[dict]:
+    """Retrieve all outreach logs for a given lead_id ordered chronologically."""
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM outreach_logs WHERE lead_id = ? ORDER BY created_at ASC, id ASC",
+            (lead_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_outreach_stats(db_path: Path | str = DB_PATH) -> dict:
+    """Retrieve summary metrics for the Outreach Dashboard."""
+    try:
+        initialize_database(db_path)
+    except Exception:
+        pass
+
+    total_enqueued = pending = processing = step1_sent = step2_sent = step3_completed = failed = 0
+    contacted_leads = interested_leads = rejected_leads = 0
+
+    with get_connection(db_path) as conn:
+        try:
+            total_enqueued = conn.execute("SELECT COUNT(*) FROM outreach_queue").fetchone()[0]
+            pending = conn.execute("SELECT COUNT(*) FROM outreach_queue WHERE outreach_status = 'PENDING'").fetchone()[0]
+            processing = conn.execute("SELECT COUNT(*) FROM outreach_queue WHERE outreach_status = 'PROCESSING'").fetchone()[0]
+            step1_sent = conn.execute("SELECT COUNT(*) FROM outreach_queue WHERE outreach_status = 'SENT' AND outreach_step = 1").fetchone()[0]
+            step2_sent = conn.execute("SELECT COUNT(*) FROM outreach_queue WHERE outreach_status = 'SENT' AND outreach_step = 2").fetchone()[0]
+            step3_completed = conn.execute("SELECT COUNT(*) FROM outreach_queue WHERE (outreach_status = 'COMPLETED' OR (outreach_status = 'SENT' AND outreach_step >= 3))").fetchone()[0]
+            failed = conn.execute("SELECT COUNT(*) FROM outreach_queue WHERE outreach_status = 'FAILED'").fetchone()[0]
+        except Exception:
+            pass
+
+        try:
+            contacted_leads = conn.execute("SELECT COUNT(*) FROM leads WHERE lead_status = 'CONTACTED'").fetchone()[0]
+            interested_leads = conn.execute("SELECT COUNT(*) FROM leads WHERE lead_status = 'INTERESTED'").fetchone()[0]
+            rejected_leads = conn.execute("SELECT COUNT(*) FROM leads WHERE lead_status = 'REJECTED'").fetchone()[0]
+        except Exception:
+            pass
+
+    return {
+        "total_enqueued": total_enqueued,
+        "pending": pending,
+        "processing": processing,
+        "step1_sent": step1_sent,
+        "step2_sent": step2_sent,
+        "step3_completed": step3_completed,
+        "failed": failed,
+        "contacted_leads": contacted_leads,
+        "interested_leads": interested_leads,
+        "rejected_leads": rejected_leads,
+    }
+
+
+def find_lead_by_email_or_phone(
+    email: str | None = None,
+    phone: str | None = None,
+    db_path: Path | str = DB_PATH,
+) -> dict | None:
+    """Find a lead in SQLite matching email or phone number."""
+    with get_connection(db_path) as conn:
+        if email and email.strip():
+            clean_email = email.strip().lower()
+            row = conn.execute(
+                "SELECT * FROM leads WHERE LOWER(TRIM(email)) = ?",
+                (clean_email,),
+            ).fetchone()
+            if row:
+                return dict(row)
+
+        if phone and phone.strip():
+            # Strip non-digit characters for robust matching
+            clean_phone = "".join(c for c in phone if c.isdigit())
+            if clean_phone:
+                rows = conn.execute("SELECT * FROM leads WHERE phone IS NOT NULL AND TRIM(phone) != ''").fetchall()
+                for r in rows:
+                    r_phone = "".join(c for c in (r["phone"] or "") if c.isdigit())
+                    if r_phone and (clean_phone in r_phone or r_phone in clean_phone):
+                        return dict(r)
+
+    return None
+
+
