@@ -12,6 +12,7 @@ from .providers.website_provider import WebsiteDiscoveryProvider
 from .providers.upwork_provider import UpworkDiscoveryProvider
 from .providers.google_search_provider import GoogleSearchDiscoveryProvider
 from .providers.google_maps_provider import GoogleMapsDiscoveryProvider
+from .providers.freelancer_provider import FreelancerLiveDiscoveryProvider
 
 class ProviderRegistry:
     """In-memory registry mapping provider name → provider instance.
@@ -46,9 +47,17 @@ class ProviderRegistry:
         return len(self._providers)
 
 
+from .providers.guru_provider import GuruDiscoveryProvider
+from .providers.linkedin_provider import LinkedInDiscoveryProvider
+from .providers.peopleperhour_provider import PeoplePerHourDiscoveryProvider
+
 # Module-level singleton for convenience — the engine uses this by default.
 default_registry = ProviderRegistry()
 default_registry.register(WebsiteDiscoveryProvider())
 default_registry.register(UpworkDiscoveryProvider())
 default_registry.register(GoogleSearchDiscoveryProvider())
 default_registry.register(GoogleMapsDiscoveryProvider())
+default_registry.register(FreelancerLiveDiscoveryProvider())
+default_registry.register(GuruDiscoveryProvider())
+default_registry.register(LinkedInDiscoveryProvider())
+default_registry.register(PeoplePerHourDiscoveryProvider())

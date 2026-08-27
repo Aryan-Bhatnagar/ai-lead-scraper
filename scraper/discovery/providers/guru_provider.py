@@ -1,24 +1,23 @@
 """
-Upwork Discovery Provider.
+Guru.com Live Discovery Provider.
 
-Implements the DiscoveryProvider interface to find leads from Upwork job postings.
+Adapter enabling discovery of active client job posts from Guru.com.
 """
 
 from __future__ import annotations
-
 import re
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
+from typing import List, Dict, Any
 
+from ..query import DiscoveryBatch, DiscoveryQuery, RawCandidate, SourceMeta
 from ..provider import DiscoveryProvider, CapabilitySet
-from ..query import DiscoveryQuery, DiscoveryBatch, RawCandidate, SourceMeta
-from ...services.upwork_scraper_service import UpworkScraperService
+from ...universal_engine import scrape_genuine_client_leads
 
-def fetch_live_upwork_jobs(service_keyword: str, max_results: int = 10) -> List[Dict[str, Any]]:
-    """Extract individual live client job postings from Upwork."""
+def fetch_live_guru_jobs(service_keyword: str, max_results: int = 10) -> List[Dict[str, Any]]:
+    """Extract individual live client job postings from Guru.com."""
     from ...services.search.service import SearchService
     search_svc = SearchService()
-    query_str = f"site:upwork.com/freelance-jobs/apply {service_keyword}"
+    query_str = f"site:guru.com/jobs {service_keyword}"
     raw_results = search_svc.search(query_str, limit=max_results * 3)
     
     leads = []
@@ -33,15 +32,15 @@ def fetch_live_upwork_jobs(service_keyword: str, max_results: int = 10) -> List[
         
         if not url or url in seen_urls:
             continue
-        if "upwork.com/freelance-jobs/apply/" not in url.lower():
+        if "guru.com/jobs/" not in url.lower():
             continue
             
         seen_urls.add(url)
         
         # Clean title
-        clean_title = re.sub(r'\s*-\s*Upwork.*$', '', title_raw, flags=re.IGNORECASE).strip()
-        clean_title = re.sub(r'^\s*Freelance Job in\s*', '', clean_title, flags=re.IGNORECASE).strip()
-        clean_title = clean_title or f"Upwork Client Job: {service_keyword}"
+        clean_title = re.sub(r'\s*\(\d+\)\s*-\s*Freelance Job.*$', '', title_raw, flags=re.IGNORECASE).strip()
+        clean_title = re.sub(r'\s*-\s*Guru.*$', '', clean_title, flags=re.IGNORECASE).strip()
+        clean_title = clean_title or f"Guru.com Client Job: {service_keyword}"
         
         # Extract budget from snippet
         b_match = re.search(r'\$([0-9,]+(?:\s*-\s*\$?[0-9,]+)?)', snippet)
@@ -51,28 +50,28 @@ def fetch_live_upwork_jobs(service_keyword: str, max_results: int = 10) -> List[
         elif h_match:
             budget_str = f"Hourly {h_match.group(1)}"
         else:
-            budget_str = "Verified Client Budget"
+            budget_str = "Budget Negotiable"
             
-        ai_summary = f"LIVE Upwork Job: '{clean_title}'. Client active project budget: {budget_str}. Requirements: {snippet[:300]}"
-        outreach_strategy = f"Submit targeted proposal on Upwork application link. Highlight relevant {service_keyword} portfolio samples and clear turnaround timeframe."
-        buying_signals_text = f"Budget: {budget_str} | Verified Client Job Post"
+        ai_summary = f"LIVE Guru.com Job: '{clean_title}'. Client project budget: {budget_str}. Requirements: {snippet[:300]}"
+        outreach_strategy = f"Submit proposal directly on Guru job link. Attach relevant {service_keyword} portfolio samples and competitive pricing."
+        buying_signals_text = f"Budget: {budget_str} | Active Guru Client Job Post"
         
-        full_desc = f"LIVE Upwork Client Job: '{clean_title}'. Budget: {budget_str}. Details: {snippet}"
+        full_desc = f"LIVE Client Job Post on Guru.com: '{clean_title}'. Budget: {budget_str}. Details: {snippet}"
         
         leads.append({
-            "company": f"Upwork Client ({clean_title[:35]}...)",
-            "company_name": f"Upwork Client: {clean_title}",
+            "company": f"Guru Client ({clean_title[:35]}...)",
+            "company_name": f"Guru.com Client: {clean_title}",
             "title": clean_title,
             "name": f"Verified Buyer Client ({budget_str})",
             "service": service_keyword,
-            "phone": "Apply & Chat Directly on Upwork Job Page",
+            "phone": "Apply Directly on Guru Job Page",
             "email": "Direct Active Client Post",
-            "source": "upwork",
-            "source_platform": "Upwork Active Buyer Job",
+            "source": "guru",
+            "source_platform": "Guru.com Active Buyer Job",
             "source_url": url,
             "website": url,
             "url": url,
-            "has_website": "Live Upwork.com Link ↗",
+            "has_website": "Live Guru.com Link ↗",
             "lead_type": "Genuine Buyer Client",
             "description": full_desc,
             "summary": full_desc,
@@ -85,17 +84,17 @@ def fetch_live_upwork_jobs(service_keyword: str, max_results: int = 10) -> List[
         
     return leads
 
-class UpworkDiscoveryProvider(DiscoveryProvider):
+class GuruDiscoveryProvider(DiscoveryProvider):
     """
-    Adapter that enables the discovery engine to find leads from Upwork.
+    Provider adapter for discovering active client jobs on Guru.com.
     """
 
-    name = "upwork"
-    source_type = "scrape"
+    name = "guru"
+    source_type = "api"
     requires_api_key = False
 
     capabilities = CapabilitySet(
-        can_provide_website=False,
+        can_provide_website=True,
         can_provide_email=False,
         can_provide_phone=False,
         can_provide_rating=False,
@@ -104,24 +103,24 @@ class UpworkDiscoveryProvider(DiscoveryProvider):
         can_provide_business_hours=False,
         can_provide_social_links=False,
         can_provide_categories=True,
-        custom={"payment_type", "experience_level", "proposal_count", "budget"}
+        custom={"budget", "source_platform"}
     )
 
     def discover(self, query: DiscoveryQuery) -> DiscoveryBatch:
         candidates: List[RawCandidate] = []
         search_term = query.industry or (query.keywords[0] if query.keywords else "Web Development")
 
-        upwork_leads = fetch_live_upwork_jobs(service_keyword=search_term, max_results=query.max_results)
+        guru_leads = fetch_live_guru_jobs(service_keyword=search_term, max_results=query.max_results)
         
         # Fallback if specific search returns 0 leads
-        if not upwork_leads:
+        if not guru_leads:
             from ...universal_engine import scrape_genuine_client_leads
-            upwork_leads = scrape_genuine_client_leads(search_term, source="upwork", max_results=query.max_results)
+            guru_leads = scrape_genuine_client_leads(service=search_term, source="guru", max_results=query.max_results)
 
-        for job in upwork_leads:
+        for lead in guru_leads:
             candidates.append(
                 RawCandidate(
-                    payload=job,
+                    payload=lead,
                     source=self.name,
                     fetched_at=datetime.now(timezone.utc)
                 )
@@ -130,15 +129,5 @@ class UpworkDiscoveryProvider(DiscoveryProvider):
         return DiscoveryBatch(
             source=self.name,
             candidates=candidates,
-            meta=SourceMeta(
-                source=self.name,
-                request_count=1
-            )
+            meta=SourceMeta(source=self.name, request_count=1)
         )
-
-    def _perform_upwork_search(self, terms: List[str], max_results: int, location: Optional[str]) -> List[dict]:
-        """
-        DEPRECATED: This logic has been moved to UpworkScraperService.
-        Maintained for backward compatibility if needed, but no longer used by discover().
-        """
-        return []
