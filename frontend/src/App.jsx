@@ -9,6 +9,7 @@ import Leads from './pages/Leads/Leads'
 import Outreach from './pages/Outreach/Outreach'
 import Analytics from './pages/Analytics/Analytics'
 import Settings from './pages/Settings/Settings'
+import Team from './pages/Team/Team'
 import Opportunities from './pages/Opportunities'
 
 export default function App() {
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/enrichment" element={<Enrichment />} />
           <Route path="/email-extraction" element={<EmailExtraction />} />
           <Route path="/leads" element={<Leads />} />
+          <Route path="/team" element={<Team />} />
           <Route path="/outreach" element={<Outreach />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/settings" element={<Settings />} />
