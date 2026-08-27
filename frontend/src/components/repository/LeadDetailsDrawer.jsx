@@ -198,7 +198,15 @@ export default function LeadDetailsDrawer({ lead, onClose }) {
                   )}
                   <DrawerRow icon={User} label="Contact">
                     {lead.contact_name || '—'}
+                    {lead.job_title && <span className="text-slate-400"> ({lead.job_title})</span>}
                   </DrawerRow>
+                  {lead.assigned_member_name && (
+                    <DrawerRow icon={User} label="Assigned Employee">
+                      <span className="font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 px-2.5 py-1 rounded-md text-xs inline-flex items-center gap-1">
+                        👤 {lead.assigned_member_name} ({lead.assigned_member_domain || 'Team'})
+                      </span>
+                    </DrawerRow>
+                  )}
                   {lead.job_title && (
                     <DrawerRow icon={Briefcase} label="Job Title">
                       {lead.job_title}

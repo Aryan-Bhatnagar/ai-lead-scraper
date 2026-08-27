@@ -30,8 +30,13 @@ export default function EmailExtraction() {
       const response = await fetch('/api/leads')
       if (!response.ok) throw new Error('Failed to fetch candidates')
       const data = await response.json()
-      // Candidates: have website but no email
-      const eligible = (data.leads || []).filter(l => l.website && !l.email)
+      // Candidates: have website but no email (excluding Freelancer project links)
+      const eligible = (data.leads || []).filter(l => 
+        l.website && 
+        !l.email && 
+        (l.source || '').toLowerCase() !== 'freelancer' &&
+        !l.website.includes('freelancer.com')
+      )
       setCandidates(eligible)
     } catch (err) {
       setError(err.message)
@@ -106,7 +111,7 @@ export default function EmailExtraction() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          leads: selectedLeads.map(l => ({ website: l.website }))
+          leads: selectedLeads.map(l => ({ id: l.id, website: l.website }))
         })
       })
 
@@ -116,6 +121,8 @@ export default function EmailExtraction() {
       setResults(data.results || [])
       setProgress(prev => ({ ...prev, processed: prev.total, status: 'Complete' }))
       toast.success('Extraction complete!')
+      setSelectedIds(new Set())
+      await fetchCandidates()
     } catch (err) {
       toast.error(`Extraction failed: ${err.message}`)
       setProgress(prev => ({ ...prev, status: 'Error occurred' }))

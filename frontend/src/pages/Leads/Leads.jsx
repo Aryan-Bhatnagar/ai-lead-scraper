@@ -26,7 +26,7 @@ export default function Leads() {
   const [cityFilter, setCityFilter] = useState('All')
   const [qualityFilter, setQualityFilter] = useState('All')
   const [page, setPage] = useState(1)
-  const [sortBy, setSortBy] = useState('quality_score')
+  const [sortBy, setSortBy] = useState('scraped_at')
   const [sortDesc, setSortDesc] = useState(true)
 
   const PAGE_SIZE = 8
@@ -87,16 +87,20 @@ export default function Leads() {
   const processedLeads = useMemo(() => {
     if (isSearching) return leads
     let rows = [...clientLeads]
-    if (sourceFilter !== 'All') rows = rows.filter((l) => l.source.includes(sourceFilter))
+    if (sourceFilter !== 'All') rows = rows.filter((l) => (l.source || '').toLowerCase().includes(sourceFilter.toLowerCase()))
     if (lifecycleFilter !== 'All') rows = rows.filter((l) => l.lifecycle === lifecycleFilter)
     if (countryFilter !== 'All') rows = rows.filter((l) => l.country === countryFilter)
     if (cityFilter !== 'All') rows = rows.filter((l) => l.city === cityFilter)
     if (qualityFilter !== 'All') rows = rows.filter((l) => l.quality_tier === qualityFilter)
     rows.sort((a, b) => {
-      const get = (k) => (k === 'quality_score' ? a.score : k === 'company_name' ? a.company_name.toLowerCase() : a[k])
-      const getB = (k) => (k === 'quality_score' ? b.score : k === 'company_name' ? b.company_name.toLowerCase() : b[k])
-      const av = get(sortBy)
-      const bv = getB(sortBy)
+      const get = (k, item) => (
+        k === 'quality_score' ? item.score :
+        k === 'scraped_at' || k === 'created_at' ? (item.discovered_at || item.scraped_at || item.created_at || item.id) :
+        k === 'company_name' ? (item.company_name || '').toLowerCase() :
+        item[k]
+      )
+      const av = get(sortBy, a)
+      const bv = get(sortBy, b)
       if (av == null) return 1
       if (bv == null) return -1
       if (typeof av === 'string') return sortDesc ? bv.localeCompare(av) : av.localeCompare(bv)

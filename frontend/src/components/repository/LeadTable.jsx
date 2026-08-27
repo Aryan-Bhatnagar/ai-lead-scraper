@@ -8,6 +8,7 @@ import {
   Download,
   Trash2,
   AlertCircle,
+  Send,
 } from 'lucide-react'
 import ScoreBadge from '../reusable/badges/ScoreBadge'
 import OpportunityScoreBadge from '../reusable/badges/OpportunityScoreBadge'
@@ -15,6 +16,8 @@ import LifecycleBadge from '../reusable/badges/LifecycleBadge'
 import SourceBadge from '../reusable/badges/SourceBadge'
 import Pagination from '../reusable/Pagination'
 import { SkeletonTableRow } from '../reusable/SkeletonLoader'
+import api from '../../services/api'
+import toast from 'react-hot-toast'
 
 export const PAGE_SIZE = 8
 
@@ -53,20 +56,11 @@ function sortIndicator(active, direction) {
   )
 }
 
-/**
- * LeadTable
- * ---------
- * Controlled table. The parent owns sorting (sortBy / sortDesc / onSort),
- * pagination (page / totalPages / totalItems / onPageChange) and the rows
- * themselves (already filtered). Selection stays local (UI-only) until an
- * action is performed, then cleared via onExport.
- */
 export default function LeadTable({
   leads,
   loading = false,
   onView,
-  onDelete, // New callback for bulk delete
-  // server-driven props (all optional — fall back to internal defaults)
+  onDelete,
   page: pageProp = 1,
   totalPages: totalPagesProp = 1,
   totalItems: totalItemsProp,
@@ -123,6 +117,24 @@ export default function LeadTable({
     } catch (error) {
       console.error('Bulk delete failed:', error)
       setShowDeleteConfirm(false)
+    }
+  }
+
+  const handleEnqueueLead = async (e, lead) => {
+    e.stopPropagation()
+    const channel = lead.email ? 'EMAIL' : lead.phone ? 'WHATSAPP' : null
+    if (!channel) {
+      toast.error('Lead has neither email nor phone number')
+      return
+    }
+    try {
+      await api.post('/api/outreach', {
+        lead_id: lead.id,
+        outreach_channel: channel,
+      })
+      toast.success(`Queued #${lead.id} (${lead.company_name || 'Lead'}) for ${channel} outreach!`)
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to queue lead for outreach')
     }
   }
 
@@ -217,6 +229,7 @@ export default function LeadTable({
                   aria-label="Select all on page"
                 />
               </th>
+              {headerCell('id', 'ID')}
               {headerCell('company_name', 'Company')}
               {headerCell('contact_name', 'Contact')}
               {headerCell('email', 'Email')}
@@ -236,7 +249,7 @@ export default function LeadTable({
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {loading
-              ? Array.from({ length: PAGE_SIZE }).map((_, i) => <SkeletonTableRow key={i} columns={13} />)
+              ? Array.from({ length: PAGE_SIZE }).map((_, i) => <SkeletonTableRow key={i} columns={14} />)
               : pageLeads.map((lead) => {
                   const isSelected = selected.has(lead.id)
                   const domain = lead.website?.replace(/^https?:\/\//, '').replace(/\/$/, '')
@@ -259,6 +272,9 @@ export default function LeadTable({
                           className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
                           aria-label={`Select ${lead.company_name}`}
                         />
+                      </td>
+                      <td className="px-4 py-3 text-xs font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        #{lead.id}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5 max-w-[230px]">
@@ -298,39 +314,44 @@ export default function LeadTable({
                           {domain || '—'}
                         </a>
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[140px]">
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[160px]">
                         {location}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 truncate max-w-[120px]">
-                        {lead.company_size || lead.company_size_estimate || '—'}
+                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
+                        {lead.company_size_estimate || '—'}
                       </td>
                       <td className="px-4 py-3">
                         <SourceBadge source={lead.source} />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <OpportunityScoreBadge score={lead.opportunity_score} size="sm" />
+                        <OpportunityScoreBadge score={lead.score} />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <ScoreBadge score={lead.score} />
+                        <ScoreBadge tier={lead.quality_tier} score={lead.score} />
                       </td>
                       <td className="px-4 py-3">
-                        <LifecycleBadge state={lead.lifecycle} />
+                        <LifecycleBadge status={lead.lifecycle} />
                       </td>
-                      <td className="px-4 py-3 text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">
-                        {formatDate(lead.last_updated)}
+                      <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">
+                        {formatDate(lead.updated_at)}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onView?.(lead)
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-100/80 dark:hover:bg-primary-500/15 rounded-lg transition-all duration-150 opacity-0 group-hover:opacity-100 focus:opacity-100 active:scale-95"
-                          title="View details"
-                          aria-label={`View ${lead.company_name}`}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </button>
+                      <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={(e) => handleEnqueueLead(e, lead)}
+                            className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-500/20 rounded transition-colors"
+                            title="Queue for Outreach"
+                          >
+                            <Send size={15} />
+                          </button>
+                          <button
+                            onClick={() => onView?.(lead)}
+                            className="p-1 text-slate-500 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-500/20 rounded transition-colors"
+                            title="View Details"
+                          >
+                            <Eye size={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -339,15 +360,13 @@ export default function LeadTable({
         </table>
       </div>
 
-      <div className="px-4 pb-2">
-        <Pagination
-          page={pageProp}
-          totalPages={totalPagesProp}
-          totalItems={totalItems}
-          pageSize={PAGE_SIZE}
-          onPageChange={onPageChange}
-        />
-      </div>
+      <Pagination
+        page={pageProp}
+        totalPages={totalPagesProp}
+        totalItems={totalItems}
+        pageSize={PAGE_SIZE}
+        onPageChange={onPageChange}
+      />
     </div>
   )
 }

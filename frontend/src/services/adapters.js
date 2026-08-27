@@ -58,9 +58,9 @@ export function normalizeSourceName(rawSource) {
   if (lower.includes('zoominfo')) return 'Apollo'  // Map to Apollo
   if (lower.includes('lusha')) return 'Apollo'    // Map to Apollo
   if (lower.includes('upwork')) return 'Upwork'
-  if (lower.includes('freelancer')) return 'Upwork' // Map to Upwork
-  if (lower.includes('peopleperhour') || lower.includes('people_per_hour')) return 'Upwork'
-  if (lower.includes('guru')) return 'Upwork'
+  if (lower.includes('freelancer')) return 'Freelancer'
+  if (lower.includes('peopleperhour') || lower.includes('people_per_hour')) return 'PeoplePerHour'
+  if (lower.includes('guru')) return 'Guru'
 
   // imported:// paths: try to guess the dataset name
   if (rawSource.startsWith('imported://')) {

@@ -14,7 +14,7 @@ export const PROVIDERS = [
   { id: 'freelancer', label: 'Freelancer', icon: Camera, implemented: true },
   { id: 'guru', label: 'Guru', icon: Globe, implemented: true },
   { id: 'peopleperhour', label: 'PeoplePerHour', icon: Globe, implemented: true },
-  { id: 'linkedin', label: 'LinkedIn', icon: Linkedin, implemented: false },
+  { id: 'linkedin', label: 'LinkedIn', icon: Linkedin, implemented: true },
   { id: 'instagram', label: 'Instagram', icon: Instagram, implemented: false },
 ]
 
