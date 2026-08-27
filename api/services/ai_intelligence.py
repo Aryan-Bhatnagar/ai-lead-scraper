@@ -7,6 +7,25 @@ from scrapegraphai.graphs import SmartScraperGraph
 from scraper.database import upsert_ai_insights, get_ai_insights_by_lead_id
 from langchain_ollama import ChatOllama
 
+from scraper.discovery.providers.google_search_provider import is_valid_client_url
+
+def validate_lead_quality(lead_data: dict) -> bool:
+    if not isinstance(lead_data, dict):
+        return False
+    email = lead_data.get('email')
+    phone = lead_data.get('phone')
+    website = lead_data.get('website', '') or lead_data.get('url', '')
+    
+    # Drop leads that have no contact info AND no valid website
+    if not email and not phone and (not website or website == 'N/A'):
+        return False
+        
+    # Drop directory portals or competitor URLs
+    if website and website != 'N/A' and not is_valid_client_url(website):
+        return False
+        
+    return True
+
 class BaseAIProvider(ABC):
     """Abstract Base Class for AI Intelligence Providers."""
 
@@ -18,7 +37,11 @@ class BaseAIProvider(ABC):
         "industry_category": "",
         "technologies_used": [],
         "pain_points": [],
-        "sales_opportunities": []
+        "sales_opportunities": [],
+        "requirement_evidence": [],
+        "is_buyer_client": True,
+        "email": None,
+        "phone": None
     }
 
     @abstractmethod
@@ -71,6 +94,49 @@ class BaseAIProvider(ABC):
             else:
                 final_result[key] = default_value
 
+        # Ensure standard list fields are strictly lists of strings for n8n contract safety
+        for str_list_key in ["services_offered", "pain_points", "sales_opportunities", "target_customers", "technologies_used"]:
+            raw_list = final_result.get(str_list_key) or []
+            clean_str_list = []
+            if isinstance(raw_list, list):
+                for item in raw_list:
+                    if isinstance(item, str) and item.strip():
+                        clean_str_list.append(item.strip())
+                    elif isinstance(item, dict):
+                        text = str(item.get("signal") or item.get("quote") or item.get("service") or item.get("pain_point") or "").strip()
+                        if text:
+                            clean_str_list.append(text)
+            final_result[str_list_key] = clean_str_list
+
+        # Strictly sanitize requirement_evidence schema shape & verify non-empty verbatim quotes
+        raw_evidence = final_result.get("requirement_evidence") or []
+        sanitized_evidence = []
+        if isinstance(raw_evidence, list):
+            for item in raw_evidence:
+                if isinstance(item, dict):
+                    sig = str(item.get("signal") or "").strip()
+                    quot = str(item.get("quote") or "").strip()
+                    src = str(item.get("source") or "Business Profile").strip()
+                    
+                    # Rule: Do not fabricate quotes! If quote is missing or empty, drop the item.
+                    if not quot:
+                        continue
+                        
+                    sanitized_evidence.append({
+                        "signal": sig or "Buyer Intent Signal",
+                        "quote": quot,
+                        "source": src
+                    })
+                elif isinstance(item, str) and item.strip():
+                    item_str = item.strip()
+                    # A raw string from the LLM is the verbatim quote text itself
+                    sanitized_evidence.append({
+                        "signal": "Buyer Intent Signal",
+                        "quote": item_str,
+                        "source": "Business Profile"
+                    })
+        final_result["requirement_evidence"] = sanitized_evidence
+
         return final_result
 
 class OllamaProvider(BaseAIProvider):
@@ -102,20 +168,35 @@ class OllamaProvider(BaseAIProvider):
         details = business_profile.get("business_details", {})
         description = details.get("description", "No description available")
 
+        enable_intent = os.getenv("ENABLE_INTENT_DISCOVERY", "false").lower() in ("true", "1", "t", "yes")
+        evidence_instruction = (
+            "\n- requirement_evidence: (list of JSON objects strictly matching this exact schema: {\"signal\": \"short label\", \"quote\": \"verbatim quote from source text\", \"source\": \"URL or source\"}.\n"
+            "   CRITICAL GROUNDING RULES FOR REQUIREMENT EVIDENCE:\n"
+            "   1. Look for ANY explicit evidence indicating the business wants to hire, contract, outsource, or commission design/web/branding/UX work — e.g. 'hiring designer', 'seeking agency partner', 'accepting bids', 'contract search', 'in the market for', 'site needs an update', 'looking for vendor', 'RFP', 'website overhaul', 'logo redesign'.\n"
+            "   2. DO NOT include restated business services or general facts (e.g. 'multispecialty dental clinic', 'provides implants', 'real estate broker') as evidence. What a company ALREADY DOES is NOT evidence of buyer intent!\n"
+            "   3. Every item MUST be a JSON object with ALL 3 KEYS ('signal', 'quote', 'source'). The 'quote' field MUST contain the exact verbatim text snippet from the business profile. NEVER return plain strings or objects with empty quotes.\n"
+            "   4. If there is no explicit hiring, contract, or vendor request in the text, return an empty list [])."
+            if enable_intent else ""
+        )
+
         # Step 2 & 3: Pass the Business Profile content to the LLM with a dedicated Business Intelligence prompt
         bi_prompt = (
             f"You are a Senior Business Analyst. Based on the following Business Profile for {company_name}, "
             f"and this existing context: {context}, generate high-level business intelligence. "
             f"\n\nBusiness Profile:\n{json.dumps(business_profile, indent=2)}\n\n"
             "You MUST return a valid JSON object with exactly these keys:\n"
-            "- company_summary: (2-sentence high-level pitch)\n"
-            "- services_offered: (list of core products/services)\n"
+            "- is_buyer_client: (true if this is a potential BUYER CLIENT business that might hire for services, false if a freelancer portfolio or competitor showcase)\n"
+            "- email: (verified contact email address if found in text, else null)\n"
+            "- phone: (verified contact phone or WhatsApp number if found in text, else null)\n"
+            "- company_summary: (2-sentence high-level pitch of what the company does)\n"
+            "- services_offered: (list of core products/services THAT THIS COMPANY SELLS OR PROVIDES TO THEIR CUSTOMERS. Example: A real estate broker sells real estate brokerage/property consulting, NOT web design. A dental clinic provides healthcare/dentistry, NOT logo design. NEVER list services they are seeking to hire or buy).\n"
             "- target_customers: (ideal customer profile)\n"
             "- business_model: (how they make money, e.g., SaaS, Agency)\n"
             "- industry_category: (primary industry)\n"
             "- technologies_used: (list of identified tech stack)\n"
             "- pain_points: (list of likely operational or growth struggles)\n"
             "- sales_opportunities: (specific ways Bilvaleaf can help them)\n"
+            f"{evidence_instruction}\n"
             "\nEnsure the response is only the JSON object."
         )
 
@@ -165,20 +246,35 @@ class OpenAIProvider(BaseAIProvider):
         details = business_profile.get("business_details", {})
         description = details.get("description", "No description available")
 
+        enable_intent = os.getenv("ENABLE_INTENT_DISCOVERY", "false").lower() in ("true", "1", "t", "yes")
+        evidence_instruction = (
+            "\n- requirement_evidence: (list of JSON objects strictly matching this exact schema: {\"signal\": \"short label\", \"quote\": \"verbatim quote from source text\", \"source\": \"URL or source\"}.\n"
+            "   CRITICAL GROUNDING RULES FOR REQUIREMENT EVIDENCE:\n"
+            "   1. Look for ANY explicit evidence indicating the business wants to hire, contract, outsource, or commission design/web/branding/UX work — e.g. 'hiring designer', 'seeking agency partner', 'accepting bids', 'contract search', 'in the market for', 'site needs an update', 'looking for vendor', 'RFP', 'website overhaul', 'logo redesign'.\n"
+            "   2. DO NOT include restated business services or general facts (e.g. 'multispecialty dental clinic', 'provides implants', 'real estate broker') as evidence. What a company ALREADY DOES is NOT evidence of buyer intent!\n"
+            "   3. Every item MUST be a JSON object with ALL 3 KEYS ('signal', 'quote', 'source'). The 'quote' field MUST contain the exact verbatim text snippet from the business profile. NEVER return plain strings or objects with empty quotes.\n"
+            "   4. If there is no explicit hiring, contract, or vendor request in the text, return an empty list [])."
+            if enable_intent else ""
+        )
+
         # Step 2 & 3: Dedicated BI analysis using the same LLM provider via ScrapeGraphAI
         bi_prompt = (
             f"You are a Senior Business Analyst. Based on the following Business Profile for {company_name}, "
             f"and this existing context: {context}, generate high-level business intelligence. "
             f"\n\nBusiness Profile:\n{json.dumps(business_profile, indent=2)}\n\n"
             "You MUST return a valid JSON object with exactly these keys:\n"
-            "- company_summary: (2-sentence high-level pitch)\n"
-            "- services_offered: (list of core products/services)\n"
+            "- is_buyer_client: (true if this is a potential BUYER CLIENT business that might hire for services, false if a freelancer portfolio or competitor showcase)\n"
+            "- email: (verified contact email address if found in text, else null)\n"
+            "- phone: (verified contact phone or WhatsApp number if found in text, else null)\n"
+            "- company_summary: (2-sentence high-level pitch of what the company does)\n"
+            "- services_offered: (list of core products/services THAT THIS COMPANY SELLS OR PROVIDES TO THEIR CUSTOMERS. Example: A real estate broker sells real estate brokerage/property consulting, NOT web design. A dental clinic provides healthcare/dentistry, NOT logo design. NEVER list services they are seeking to hire or buy).\n"
             "- target_customers: (ideal customer profile)\n"
             "- business_model: (how they make money, e.g., SaaS, Agency)\n"
             "- industry_category: (primary industry)\n"
             "- technologies_used: (list of identified tech stack)\n"
             "- pain_points: (list of likely operational or growth struggles)\n"
             "- sales_opportunities: (specific ways Bilvaleaf can help them)\n"
+            f"{evidence_instruction}\n"
             "\nEnsure the response is only the JSON object."
         )
 
@@ -188,18 +284,97 @@ class OpenAIProvider(BaseAIProvider):
 
         return self._ensure_schema(result)
 
+class GroqProvider(BaseAIProvider):
+    """Groq Llama-3 sub-second implementation of AI Intelligence Provider."""
+
+    def __init__(self):
+        self.api_key = os.getenv("GROQ_API_KEY")
+        self.model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+    def generate_intelligence(self, business_profile: Dict[str, Any], context: str) -> Dict[str, Any]:
+        company_name = business_profile.get("company_name", "the company")
+        enable_intent = os.getenv("ENABLE_INTENT_DISCOVERY", "false").lower() in ("true", "1", "t", "yes")
+        evidence_instruction = (
+            "\n- requirement_evidence: (list of JSON objects strictly matching this exact schema: {\"signal\": \"short label\", \"quote\": \"verbatim quote from source text\", \"source\": \"URL or source\"}.\n"
+            "   CRITICAL GROUNDING RULES FOR REQUIREMENT EVIDENCE:\n"
+            "   1. Look for ANY explicit evidence indicating the business wants to hire, contract, outsource, or commission design/web/branding/UX work — e.g. 'hiring designer', 'seeking agency partner', 'accepting bids', 'contract search', 'in the market for', 'site needs an update', 'looking for vendor', 'RFP', 'website overhaul', 'logo redesign'.\n"
+            "   2. DO NOT include restated business services or general facts (e.g. 'multispecialty dental clinic', 'provides implants', 'real estate broker') as evidence. What a company ALREADY DOES is NOT evidence of buyer intent!\n"
+            "   3. Every item MUST be a JSON object with ALL 3 KEYS ('signal', 'quote', 'source'). The 'quote' field MUST contain the exact verbatim text snippet from the business profile. NEVER return plain strings or objects with empty quotes.\n"
+            "   4. If there is no explicit hiring, contract, or vendor request in the text, return an empty list [])."
+            if enable_intent else ""
+        )
+
+        bi_prompt = (
+            f"You are a Senior Business Analyst. Based on the following Business Profile for {company_name}, "
+            f"and this existing context: {context}, generate high-level business intelligence. "
+            f"\n\nBusiness Profile:\n{json.dumps(business_profile, indent=2)}\n\n"
+            "You MUST return a valid JSON object with exactly these keys:\n"
+            "- is_buyer_client: (true if this is a potential BUYER CLIENT business that might hire for services, false if a freelancer portfolio or competitor showcase)\n"
+            "- email: (verified contact email address if found in text, else null)\n"
+            "- phone: (verified contact phone or WhatsApp number if found in text, else null)\n"
+            "- company_summary: (2-sentence high-level pitch of what the company does)\n"
+            "- services_offered: (list of core products/services THAT THIS COMPANY SELLS OR PROVIDES TO THEIR CUSTOMERS).\n"
+            "- target_customers: (ideal customer profile)\n"
+            "- business_model: (how they make money, e.g., SaaS, Agency)\n"
+            "- industry_category: (primary industry)\n"
+            "- technologies_used: (list of identified tech stack)\n"
+            "- pain_points: (list of likely operational or growth struggles)\n"
+            "- sales_opportunities: (specific ways Bilvaleaf can help them)\n"
+            f"{evidence_instruction}\n"
+            "\nEnsure the response is only the JSON object."
+        )
+
+        if not self.api_key:
+            raise ValueError("GROQ_API_KEY is missing")
+
+        import urllib.request
+        req_data = json.dumps({
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": "You are a professional business analyst. Output valid JSON only."},
+                {"role": "user", "content": bi_prompt}
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.groq.com/openai/v1/chat/completions",
+            data=req_data,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                res_json = json.loads(resp.read().decode("utf-8"))
+                content = res_json["choices"][0]["message"]["content"]
+                return self._ensure_schema(content)
+        except Exception as e:
+            print(f"[GroqProvider] API Error: {e}")
+            raise e
+
+
 class IntelligenceManager:
     """Orchestrates AI Intelligence generation and caching."""
 
     def __init__(self):
-        # Decide provider based on environment variable
-        provider_type = os.getenv("AI_INTELLIGENCE_PROVIDER", "ollama").lower()
-        if provider_type == "openai":
+        # Decide provider based on environment variable or GROQ_API_KEY presence
+        provider_type = os.getenv("AI_INTELLIGENCE_PROVIDER", "").lower()
+        groq_key = os.getenv("GROQ_API_KEY")
+
+        if provider_type == "groq" or (groq_key and not provider_type):
+            self.provider = GroqProvider()
+        elif provider_type == "openai":
             self.provider = OpenAIProvider()
         elif provider_type == "ollama":
             self.provider = OllamaProvider()
+        elif groq_key:
+            self.provider = GroqProvider()
         else:
-            raise ValueError(f"Unsupported AI provider: {provider_type}")
+            self.provider = OllamaProvider()
 
     @staticmethod
     def _is_cache_valid(cached: Dict[str, Any]) -> bool:

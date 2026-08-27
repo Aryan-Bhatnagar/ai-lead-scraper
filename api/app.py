@@ -36,6 +36,7 @@ from typing import Any, Dict, List
 from flask import Flask, jsonify, request, abort
 import json
 import os
+import re
 import requests
 from urllib.parse import urlparse
 from flask_cors import CORS
@@ -86,12 +87,14 @@ def get_leads(
     limit: int | None = None,
     offset: int | None = None,
     filter_source: str | None = None,
+    search: str | None = None,
 ) -> List[Dict[str, Any]]:
     """Return all leads, optionally filtered by:
     * ``status`` – the scraper‑generated status field,
     * ``data_quality`` – the quality bucket,
     * ``lead_status`` – the new CRM lifecycle status,
-    * ``filter_source`` – the normalized source (Apollo, Upwork, …).
+    * ``filter_source`` – the normalized source (Apollo, Upwork, …),
+    * ``search`` – keyword search on company, contact, email, or normalized phone digits.
     ``None`` for any filter means no filtering on that column.
 
     Supports sorting (default: id DESC) and pagination.
@@ -111,6 +114,35 @@ def get_leads(
     if filter_source:
         clauses.append("(source = ? OR source_url LIKE ?)")
         params.extend([filter_source, f"%{filter_source}%"])
+
+    if search and search.strip():
+        s_clean = search.strip()
+        clean_digits = re.sub(r'\D', '', s_clean)
+        norm_phone_sql = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(phone, ''), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), '.', '')"
+        
+        search_clauses = []
+        if clean_digits and len(clean_digits) >= 6:
+            phone_patterns = [f"%{clean_digits}%"]
+            if clean_digits.startswith("91") and len(clean_digits) == 12:
+                phone_patterns.append(f"%{clean_digits[2:]}%")
+            
+            phone_sub = " OR ".join([f"{norm_phone_sql} LIKE ?" for _ in phone_patterns])
+            
+            # Check if search term is purely a phone number (digits and phone formatting characters only)
+            if len(clean_digits) == len(re.sub(r'[\s+()-]', '', s_clean)):
+                search_clauses.append(f"({phone_sub})")
+                params.extend(phone_patterns)
+            else:
+                text_pattern = f"%{s_clean}%"
+                search_clauses.append(f"({phone_sub} OR company_name LIKE ? OR contact_name LIKE ? OR email LIKE ?)")
+                params.extend(phone_patterns + [text_pattern, text_pattern, text_pattern])
+        else:
+            text_pattern = f"%{s_clean}%"
+            search_clauses.append(f"({norm_phone_sql} LIKE ? OR company_name LIKE ? OR contact_name LIKE ? OR email LIKE ? OR CAST(id AS TEXT) = ?)")
+            params.extend([text_pattern, text_pattern, text_pattern, text_pattern, s_clean])
+        
+        clauses.extend(search_clauses)
+
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
 
@@ -124,7 +156,7 @@ def get_leads(
         direction = "DESC" if sort_desc else "ASC"
         query += f" ORDER BY {sort_by} {direction}"
     else:
-        query += " ORDER BY id DESC"
+        query += " ORDER BY scraped_at DESC, id DESC"
 
     # Apply pagination
     if limit is not None:
@@ -158,7 +190,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         A fully initialised Flask application.
     """
     app = Flask("bilvaleaf_bdp")
-    CORS(app)  # Enable CORS for development.
+    CORS(app, resources={r"/api/*": {"origins": "*"}})  # Enable CORS for development.
 
     # Apply configuration – ``getattr`` is used so the caller can pass a
     # plain dict or an object with attributes.
@@ -170,10 +202,23 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     # store the path in app config for use by endpoints
     app.config["DATABASE"] = str(db_path)
 
+    # Ensure database schema, tables, and migrations are initialized
+    try:
+        db.initialize_database(db_path)
+    except Exception as exc:
+        app.logger.warning(f"Database initialization warning: {exc}")
+
     # Health check endpoint – always available.
     @app.route("/api/health", methods=["GET"])
     def health():  # pragma: no cover - trivial
         return jsonify({"status": "ok"})
+
+    @app.after_request
+    def add_cors_headers(response):
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+        return response
 
     # -------------------------------------------------------------------
     # Leads endpoints
@@ -184,6 +229,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         q = request.args.get("data_quality")
         lead_status = request.args.get("lead_status")
         filter_source = request.args.get("source")
+        search = request.args.get("search") or request.args.get("q_search")
         sort_by = request.args.get("sort", "id")
         sort_desc = request.args.get("order", "desc").lower() == "desc"
         try:
@@ -204,6 +250,7 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             limit=limit,
             offset=offset,
             filter_source=filter_source,
+            search=search,
         )
         return jsonify({"leads": leads, "count": len(leads)})
 
@@ -644,12 +691,29 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
     @app.route("/api/outreach", methods=["GET"])
     def list_outreach():
         lead_id = request.args.get("lead_id", type=int)
-        channel = request.args.get("outreach_channel")
-        status = request.args.get("outreach_status")
+        channel = request.args.get("outreach_channel") or request.args.get("channel")
+        status = request.args.get("outreach_status") or request.args.get("status")
+        step = request.args.get("outreach_step", type=int) or request.args.get("step", type=int)
+        source = request.args.get("source")
+        industry = request.args.get("industry")
+        quality_tier = request.args.get("quality_tier")
+        date_preset = request.args.get("date_preset")
+        search = request.args.get("search")
+
         entries = db.get_outreach_entries(
-            app.config["DATABASE"], lead_id=lead_id, outreach_channel=channel, outreach_status=status
+            app.config["DATABASE"],
+            lead_id=lead_id,
+            outreach_channel=channel,
+            outreach_status=status,
+            outreach_step=step,
+            source=source,
+            industry=industry,
+            quality_tier=quality_tier,
+            date_preset=date_preset,
+            search=search,
         )
         return jsonify({"outreach": entries, "count": len(entries)})
+
 
     @app.route("/api/outreach", methods=["POST"])
     def create_outreach():
@@ -674,9 +738,10 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
         lead = db.get_lead_by_id(lead_id, app.config["DATABASE"])  # noqa: E501
         if not lead:
             abort(400, description=f"Lead id {lead_id} does not exist")
-        # Eligibility – lead_status must be QUALIFIED or INTERESTED
-        if lead.get("lead_status") not in {"QUALIFIED", "INTERESTED"}:
-            abort(400, description="Lead not eligible for outreach (status must be QUALIFIED or INTERESTED)")
+        # Eligibility check – allow active leads (NEW, QUALIFIED, INTERESTED, Enriched, etc.)
+        lead_st = (lead.get("lead_status") or "").upper()
+        if lead_st in {"REJECTED", "CONVERTED"}:
+            abort(400, description=f"Lead not eligible for outreach (status is {lead.get('lead_status')})")
         # Contact info checks
         if channel == "EMAIL" and not lead.get("email"):
             abort(400, description="Lead missing email for EMAIL outreach")
@@ -811,14 +876,402 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             return jsonify({
                 "error": "OUTREACH_WEBHOOK_URL is not configured"
             }), 500
+        
+        payload = request.get_json(silent=True) or {}
+        queue_ids = payload.get("queue_ids")
+        channel = payload.get("outreach_channel") or payload.get("channel")
+        status = payload.get("outreach_status") or payload.get("status")
+        step = payload.get("outreach_step") or payload.get("step")
+        source = payload.get("source")
+        industry = payload.get("industry")
+        quality_tier = payload.get("quality_tier")
+        date_preset = payload.get("date_preset")
+        search = payload.get("search")
+
         # Import the shared service (local import to avoid circular at module load).
         from scraper import outreach_service as out_srv
         summary = out_srv.process_batch(
             limit=batch_limit,
             retry_limit=retry_limit,
             db_path=app.config["DATABASE"],
+            queue_ids=queue_ids,
+            outreach_channel=channel,
+            outreach_status=status,
+            outreach_step=step,
+            source=source,
+            industry=industry,
+            quality_tier=quality_tier,
+            date_preset=date_preset,
+            search=search,
         )
         return jsonify(summary), 200
+
+    # -------------------------------------------------------------------
+    # Outreach Callback & 3-Day Cadence Endpoints
+    # -------------------------------------------------------------------
+    @app.route("/api/outreach/callback", methods=["POST"])
+    def outreach_callback():
+        """Callback endpoint called by n8n after sending Email/WhatsApp outreach.
+
+        Payload:
+          - queue_id (int)
+          - lead_id (int)
+          - outreach_status ('SENT' | 'FAILED')
+          - outreach_channel ('EMAIL' | 'WHATSAPP') [optional]
+          - outreach_step (int) [optional]
+          - message_snippet (str) [optional]
+        """
+        payload = request.get_json(silent=True) or {}
+
+        def _clean_int(val):
+            if val is None:
+                return None
+            try:
+                return int(str(val).replace("=", "").strip())
+            except (ValueError, TypeError):
+                return None
+
+        def _clean_str(val, default=""):
+            if val is None:
+                return default
+            return str(val).replace("=", "").strip()
+
+        queue_id = _clean_int(payload.get("queue_id"))
+        lead_id = _clean_int(payload.get("lead_id"))
+        outreach_status = _clean_str(payload.get("outreach_status"), "SENT").upper()
+        outreach_channel = _clean_str(payload.get("outreach_channel"), "EMAIL").upper()
+        step = _clean_int(payload.get("outreach_step"))
+
+        if not queue_id and not lead_id:
+            abort(400, description="'queue_id' or 'lead_id' required")
+
+        db_path = app.config["DATABASE"]
+        now = db.utc_now()
+        from datetime import datetime, timedelta, timezone
+        next_24h = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+
+        with db.get_connection(db_path) as conn:
+            cur_entry = None
+            if queue_id:
+                cur_entry = db.get_outreach_entry_by_id(queue_id, db_path)
+            if not cur_entry and lead_id:
+                entries = db.get_outreach_entries(db_path, lead_id=lead_id)
+                cur_entry = entries[0] if entries else None
+                if cur_entry:
+                    queue_id = cur_entry["id"]
+
+            if not cur_entry:
+                abort(404, description=f"Outreach entry not found for queue_id={queue_id}, lead_id={lead_id}")
+
+            lead_id = cur_entry["lead_id"]
+            current_step = step if step is not None else cur_entry.get("outreach_step", 1)
+
+            if outreach_status == "SENT":
+                if current_step < 3:
+                    new_step = current_step + 1
+                    conn.execute(
+                        """
+                        UPDATE outreach_queue
+                        SET outreach_status = 'SENT',
+                            outreach_step = ?,
+                            last_contacted_at = ?,
+                            next_follow_up_at = ?,
+                            error_message = NULL,
+                            updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (new_step, now, next_24h, now, queue_id),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE outreach_queue
+                        SET outreach_status = 'COMPLETED',
+                            outreach_step = ?,
+                            last_contacted_at = ?,
+                            next_follow_up_at = NULL,
+                            error_message = NULL,
+                            updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (current_step, now, now, queue_id),
+                    )
+                # Update lead status to CONTACTED if currently NEW or QUALIFIED
+                conn.execute(
+                    """
+                    UPDATE leads
+                    SET lead_status = 'CONTACTED', updated_at = ?
+                    WHERE id = ? AND lead_status IN ('NEW', 'QUALIFIED')
+                    """,
+                    (now, lead_id),
+                )
+                db.log_outreach_event(
+                    lead_id=lead_id,
+                    queue_id=queue_id,
+                    outreach_step=current_step,
+                    outreach_channel=outreach_channel,
+                    event_type="SENT",
+                    message_snippet=payload.get("message_snippet", f"Step {current_step} sent successfully"),
+                    db_path=db_path,
+                    conn=conn,
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE outreach_queue
+                    SET outreach_status = 'FAILED',
+                        error_message = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (payload.get("error_message", "Webhook callback reported failure"), now, queue_id),
+                )
+                db.log_outreach_event(
+                    lead_id=lead_id,
+                    queue_id=queue_id,
+                    outreach_step=current_step,
+                    outreach_channel=outreach_channel,
+                    event_type="FAILED",
+                    message_snippet=payload.get("error_message", "Callback reported failure"),
+                    db_path=db_path,
+                    conn=conn,
+                )
+
+        return jsonify({"status": "success", "lead_id": lead_id, "queue_id": queue_id}), 200
+
+    @app.route("/api/outreach/enqueue_all", methods=["POST"])
+    def enqueue_all_leads():
+        """Bulk enqueues all qualified leads with email or phone into outreach_queue."""
+        db_path = app.config["DATABASE"]
+        now = db.utc_now()
+
+        with db.get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, email, phone FROM leads
+                WHERE (email IS NOT NULL AND TRIM(email) != '')
+                   OR (phone IS NOT NULL AND TRIM(phone) != '')
+                """
+            )
+            leads = cursor.fetchall()
+            enqueued = 0
+            skipped = 0
+
+            for l in leads:
+                lead_id = l["id"]
+                email = (l["email"] or "").strip()
+                phone = (l["phone"] or "").strip()
+                channel = "EMAIL" if email else "WHATSAPP"
+
+                # Check if active queue entry exists
+                active = cursor.execute(
+                    """
+                    SELECT 1 FROM outreach_queue
+                    WHERE lead_id = ? AND outreach_status IN ('PENDING', 'PROCESSING', 'SENT')
+                    """,
+                    (lead_id,),
+                ).fetchone()
+
+                if not active:
+                    cursor.execute(
+                        """
+                        INSERT INTO outreach_queue (
+                            lead_id, outreach_channel, outreach_status, outreach_step,
+                            created_at, updated_at
+                        ) VALUES (?, ?, 'PENDING', 1, ?, ?)
+                        """,
+                        (lead_id, channel, now, now),
+                    )
+                    enqueued += 1
+                else:
+                    skipped += 1
+
+        return jsonify({"enqueued": enqueued, "skipped": skipped}), 200
+
+    @app.route("/api/outreach/clear_all", methods=["POST"])
+    def clear_all_queue():
+        """Clears/dequeues all outreach items except test lead #2131."""
+        db_path = app.config["DATABASE"]
+        with db.get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM outreach_queue WHERE lead_id != 2131")
+            deleted_count = cursor.rowcount
+        return jsonify({"status": "success", "cleared": deleted_count}), 200
+
+    @app.route("/api/outreach/options", methods=["GET"])
+    def get_outreach_filter_options():
+        """Return available dynamic filter options (sources, industries, tiers) from the database."""
+        db_path = app.config["DATABASE"]
+        with db.get_connection(db_path) as conn:
+            sources = [r[0] for r in conn.execute("SELECT DISTINCT source FROM leads WHERE source IS NOT NULL AND source != '' ORDER BY source").fetchall()]
+            raw_industries = [r[0] for r in conn.execute("SELECT DISTINCT industry FROM leads WHERE industry IS NOT NULL AND industry != ''").fetchall()]
+            quality_tiers = [r[0] for r in conn.execute("SELECT DISTINCT quality_tier FROM leads WHERE quality_tier IS NOT NULL AND quality_tier != '' ORDER BY quality_tier").fetchall()]
+        
+        category_rules = {
+            "Healthcare & Medical": ["hospital", "medical", "clinic", "doctor", "health", "physician", "pediatric", "dermatologist", "optician", "surgeon", "pathologist", "imaging"],
+            "Dental & Oral Care": ["dentist", "dental", "orthodontist", "endodontist", "periodontist"],
+            "IT & Software": ["software", "it ", "information technology", "web", "app", "devops", "cloud", "data", "tech", "computer", "analytics", "ai ", "artificial intelligence"],
+            "Marketing & Advertising": ["marketing", "advertising", "seo", "media", "brand", "digital marketing", "pr "],
+            "Finance & Accounting": ["finance", "financial", "accounting", "accountant", "fintech", "banking", "tax", "audit", "investment"],
+            "Real Estate & Construction": ["real estate", "construction", "property", "building", "architect", "contractor"],
+            "Education & Training": ["school", "education", "college", "university", "coaching", "training", "learning", "academy"],
+            "Beauty & Wellness": ["salon", "spa", "beauty", "fitness", "gym", "wellness", "massage", "tattoo"],
+            "Food & Hospitality": ["restaurant", "food", "cafe", "hotel", "catering", "beverage", "bakery"],
+            "Legal & Professional Services": ["legal", "lawyer", "attorney", "consulting", "consultant", "bpo", "kpo", "advisory"]
+        }
+
+        active_categories = set()
+        has_others = False
+
+        for ind in raw_industries:
+            matched = False
+            ind_lower = ind.lower()
+            for cat, keywords in category_rules.items():
+                if any(k in ind_lower for k in keywords):
+                    active_categories.add(cat)
+                    matched = True
+                    break
+            if not matched:
+                has_others = True
+
+        sorted_industries = [cat for cat in category_rules if cat in active_categories]
+        if has_others:
+            sorted_industries.append("Other Industries")
+
+        return jsonify({
+            "sources": sources,
+            "industries": sorted_industries,
+            "quality_tiers": quality_tiers,
+        }), 200
+
+    @app.route("/api/outreach/stats", methods=["GET"])
+    def get_outreach_dashboard_stats():
+        """Return summary metrics for the Outreach Dashboard."""
+        stats = db.get_outreach_stats(app.config["DATABASE"])
+        return jsonify(stats), 200
+
+    @app.route("/api/outreach/lead/<int:lead_id>/history", methods=["GET"])
+    def get_lead_outreach_history(lead_id: int):
+        """Return chronological outreach activity logs for a lead."""
+        logs = db.get_outreach_logs_for_lead(lead_id, app.config["DATABASE"])
+        return jsonify({"lead_id": lead_id, "logs": logs, "count": len(logs)}), 200
+
+    @app.route("/api/outreach/reply_callback", methods=["POST"])
+    def outreach_reply_callback():
+        """Callback endpoint called by n8n Reply Classification workflow when a client replies.
+
+        Payload:
+          - sender_email (str) [optional]
+          - sender_phone (str) [optional]
+          - channel ('email' | 'whatsapp') [optional]
+          - intent ('POSITIVE' | 'NEGATIVE' | 'OTHER')
+          - reply_text (str) [optional]
+        """
+        payload = request.get_json(silent=True) or {}
+        sender_email = payload.get("sender_email")
+        sender_phone = payload.get("sender_phone")
+        channel = str(payload.get("channel") or "email").replace("=", "").strip().upper()
+        intent = str(payload.get("intent") or "OTHER").replace("=", "").strip().upper()
+        reply_text = payload.get("reply_text") or payload.get("email_body") or ""
+
+        db_path = app.config["DATABASE"]
+        lead = db.find_lead_by_email_or_phone(email=sender_email, phone=sender_phone, db_path=db_path)
+
+        if not lead:
+            return jsonify({
+                "status": "unmatched",
+                "message": f"No lead matched sender_email='{sender_email}' or sender_phone='{sender_phone}'",
+            }), 404
+
+        lead_id = lead["id"]
+        now = db.utc_now()
+
+        with db.get_connection(db_path) as conn:
+            entries = db.get_outreach_entries(db_path, lead_id=lead_id)
+            queue_id = entries[0]["id"] if entries else None
+            step = entries[0].get("outreach_step", 1) if entries else 1
+
+            if intent == "POSITIVE":
+                # Update lead status to INTERESTED
+                conn.execute(
+                    "UPDATE leads SET lead_status = 'INTERESTED', updated_at = ? WHERE id = ?",
+                    (now, lead_id),
+                )
+                # Stop 3-day follow-up cadence in outreach_queue
+                if queue_id:
+                    conn.execute(
+                        """
+                        UPDATE outreach_queue
+                        SET outreach_status = 'COMPLETED',
+                            next_follow_up_at = NULL,
+                            updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (now, queue_id),
+                    )
+                db.log_outreach_event(
+                    lead_id=lead_id,
+                    queue_id=queue_id,
+                    outreach_step=step,
+                    outreach_channel=channel,
+                    event_type="REPLY_RECEIVED",
+                    message_snippet=f"Intent: POSITIVE — {reply_text[:120]}",
+                    db_path=db_path,
+                    conn=conn,
+                )
+                new_status = "INTERESTED"
+
+            elif intent == "NEGATIVE":
+                # Update lead status to REJECTED
+                conn.execute(
+                    "UPDATE leads SET lead_status = 'REJECTED', updated_at = ? WHERE id = ?",
+                    (now, lead_id),
+                )
+                # Stop 3-day follow-up cadence in outreach_queue
+                if queue_id:
+                    conn.execute(
+                        """
+                        UPDATE outreach_queue
+                        SET outreach_status = 'COMPLETED',
+                            next_follow_up_at = NULL,
+                            updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (now, queue_id),
+                    )
+                db.log_outreach_event(
+                    lead_id=lead_id,
+                    queue_id=queue_id,
+                    outreach_step=step,
+                    outreach_channel=channel,
+                    event_type="REPLY_RECEIVED",
+                    message_snippet=f"Intent: NEGATIVE — {reply_text[:120]}",
+                    db_path=db_path,
+                    conn=conn,
+                )
+                new_status = "REJECTED"
+
+            else:  # OTHER
+                db.log_outreach_event(
+                    lead_id=lead_id,
+                    queue_id=queue_id,
+                    outreach_step=step,
+                    outreach_channel=channel,
+                    event_type="REPLY_RECEIVED",
+                    message_snippet=f"Intent: OTHER (Manual Team Alerted) — {reply_text[:120]}",
+                    db_path=db_path,
+                    conn=conn,
+                )
+                new_status = lead.get("lead_status", "CONTACTED")
+
+        return jsonify({
+            "status": "success",
+            "lead_id": lead_id,
+            "company_name": lead.get("company_name"),
+            "intent": intent,
+            "new_lead_status": new_status,
+        }), 200
 
     # -------------------------------------------------------------------
     # Jobs endpoints
@@ -1100,20 +1553,76 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 max_results=max_results
             )
 
+            # Map frontend provider IDs to backend source names
+            providers_input = payload.get("providers") or payload.get("provider")
+            sources = None
+            if isinstance(providers_input, list):
+                sources = ["google_search" if p == "google" else p for p in providers_input]
+            elif isinstance(providers_input, str) and providers_input.strip():
+                sources = ["google_search" if providers_input.strip() == "google" else providers_input.strip()]
+
             # Create orchestrator with legacy persistence enabled
             orchestrator = DiscoveryOrchestrator(legacy_persistence=True)
 
-            # Run the discovery
-            summary = orchestrator.run(query)
+            # Run the discovery across requested sources
+            summary = orchestrator.run(query, sources=sources)
 
-            # Convert scored leads to the format expected by the frontend
+            # Convert scored leads to format expected by frontend (filtering & interleaving by requested sources)
+            all_scored = summary.scored_leads
+            
+            if sources:
+                norm_sources = [s.lower() for s in sources]
+                source_groups = {}
+                for sl in all_scored:
+                    prov_src = sl.lead.provenance.source if (getattr(sl, "lead", None) and getattr(sl.lead, "provenance", None) and sl.lead.provenance.source) else ""
+                    src = (prov_src or getattr(sl.lead, "source", "") or "").lower()
+                    web = (getattr(sl.lead, "website", "") or "").lower()
+                    
+                    matched = False
+                    for req_src in norm_sources:
+                        if req_src in src or (req_src == "google_maps" and ("google_maps" in src or "maps" in src or "place" in web)) or (req_src == "freelancer" and "freelancer" in web) or (req_src == "upwork" and "upwork" in web) or (req_src == "linkedin" and "linkedin" in web):
+                            source_groups.setdefault(req_src, []).append(sl)
+                            matched = True
+                            break
+
+                # Round-robin interleave across requested sources
+                interleaved = []
+                max_group_len = max([len(v) for v in source_groups.values()]) if source_groups else 0
+                for i in range(max_group_len):
+                    for req_src in norm_sources:
+                        grp = source_groups.get(req_src, [])
+                        if i < len(grp):
+                            interleaved.append(grp[i])
+                
+                selected_leads = interleaved if interleaved else all_scored
+            else:
+                selected_leads = all_scored
+
             results = []
-            for scored_lead in summary.scored_leads:
+            for scored_lead in selected_leads[:max_results]:
                 lead = scored_lead.lead
+                detected_ind = getattr(lead, "industry", None) or getattr(lead, "category", None) or getattr(lead, "source_type", None)
+                src_val = getattr(lead, "source", "") or (lead.provenance.source if getattr(lead, "provenance", None) else "")
+                sk_list = getattr(lead, "skills", []) or getattr(lead, "categories", []) or []
+                sk_str = ", ".join(sk_list) if isinstance(sk_list, list) else str(sk_list)
                 results.append({
                     "title": lead.company_name or "",
                     "url": lead.website or "",
                     "description": lead.description or "",
+                    "industry": detected_ind or "Target Client Prospect",
+                    "has_requirement_evidence": getattr(lead, "has_requirement_evidence", False) or getattr(lead, "has_intent", False),
+                    "source": src_val,
+                    "ai_summary": getattr(lead, "ai_summary", None) or lead.description or "",
+                    "outreach_strategy": getattr(lead, "outreach_strategy", None) or "",
+                    "buying_signals": getattr(lead, "buying_signals", None) or "",
+                    "proposals_str": getattr(lead, "proposals_str", None) or "",
+                    "posted_time_str": getattr(lead, "posted_time_str", None) or "",
+                    "time_left_str": getattr(lead, "time_left_str", None) or "",
+                    "skills": sk_list,
+                    "skills_str": sk_str,
+                    "email": getattr(lead, "emails", [""])[0] if (getattr(lead, "emails", None) and len(lead.emails) > 0) else "Apply & Chat Directly ↗",
+                    "phone": getattr(lead, "phones", [""])[0] if (getattr(lead, "phones", None) and len(lead.phones) > 0) else "Verified Client Project",
+                    "score": getattr(scored_lead, "overall_score", 95)
                 })
         except Exception:
             app.logger.exception("Lead discovery failed")
@@ -1325,17 +1834,44 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
                 abort(400, description=f"Lead at index {i} must be an object")
             if "website" not in lead or not lead["website"] or not isinstance(lead["website"], str):
                 abort(400, description=f"Lead at index {i} must have a non-empty 'website' string")
-        # Step 5: Run email extraction
+        # Step 5: Run email extraction & persist found emails to SQLite database
         try:
             from scraper.email_extractor import extract_emails_batch
             results = extract_emails_batch(leads)
+            
+            # Step 5b: Persist extracted emails to database
+            db_path = app.config["DATABASE"]
+            updated_count = 0
+            with db.get_connection(db_path) as conn:
+                cursor = conn.cursor()
+                for item in results:
+                    found_email = item.get("email")
+                    website_url = item.get("website")
+                    lead_id = item.get("id")
+                    if found_email and isinstance(found_email, str) and found_email.strip():
+                        email_clean = found_email.strip()
+                        if lead_id:
+                            cursor.execute(
+                                "UPDATE leads SET email = ?, lead_status = CASE WHEN lead_status = 'NEW' THEN 'QUALIFIED' ELSE lead_status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                                (email_clean, lead_id)
+                            )
+                            updated_count += cursor.rowcount
+                        elif website_url:
+                            cursor.execute(
+                                "UPDATE leads SET email = ?, lead_status = CASE WHEN lead_status = 'NEW' THEN 'QUALIFIED' ELSE lead_status END, updated_at = CURRENT_TIMESTAMP WHERE website = ?",
+                                (email_clean, website_url)
+                            )
+                            updated_count += cursor.rowcount
+                conn.commit()
+            app.logger.info(f"Persisted {updated_count} extracted emails to leads database")
         except Exception as exc:
             app.logger.exception("Email extraction failed")
             return jsonify({"error": str(exc)}), 500
         # Step 6: Return results
         return jsonify({
             "results": results,
-            "count": len(results)
+            "count": len(results),
+            "db_updated": updated_count
         }), 200
 
     # ---------------------------------------------------------------------
@@ -1403,6 +1939,146 @@ def create_app(config: Dict[str, Any] | None = None) -> Flask:
             "industry": industry,
             "location": location,
             "source": "free_web"
+        }), 200
+
+    # ---------------------------------------------------------------------
+    # Team Members & Work Assignment API Endpoints
+    # ---------------------------------------------------------------------
+    @app.route("/api/team", methods=["GET"])
+    def get_team_members():
+        db_path = app.config["DATABASE"]
+        with db.get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM team_members ORDER BY id ASC")
+            members = [dict(row) for row in cursor.fetchall()]
+            
+            # Fetch assigned lead count per member
+            cursor.execute("SELECT assigned_member_id, COUNT(*) as lead_count FROM leads WHERE assigned_member_id IS NOT NULL GROUP BY assigned_member_id")
+            counts = {row["assigned_member_id"]: row["lead_count"] for row in cursor.fetchall()}
+            
+            for m in members:
+                m["domains"] = json.loads(m["domains"]) if isinstance(m["domains"], str) and m["domains"].startswith("[") else [m["domains"]]
+                m["expertise_tags"] = json.loads(m["expertise_tags"]) if isinstance(m["expertise_tags"], str) and m["expertise_tags"].startswith("[") else []
+                m["assigned_count"] = counts.get(m["id"], 0)
+                
+        return jsonify({"team": members, "count": len(members)}), 200
+
+    @app.route("/api/team", methods=["POST"])
+    def add_team_member():
+        payload = request.get_json(silent=True) or {}
+        name = payload.get("name", "").strip()
+        role = payload.get("role", "Specialist").strip()
+        domains = payload.get("domains", ["Development"])
+        expertise_tags = payload.get("expertise_tags", [])
+        email = payload.get("email", f"{name.lower().replace(' ', '.')}@bilvaleaf.com").strip()
+
+        if not name:
+            return jsonify({"error": "Employee name is required"}), 400
+
+        db_path = app.config["DATABASE"]
+        with db.get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            domains_json = json.dumps(domains) if isinstance(domains, list) else json.dumps([domains])
+            tags_json = json.dumps(expertise_tags) if isinstance(expertise_tags, list) else json.dumps([])
+            
+            cursor.execute("""
+                INSERT INTO team_members (name, email, role, domains, expertise_tags, status, created_at)
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE', ?)
+            """, (name, email, role, domains_json, tags_json, db.utc_now()))
+            member_id = cursor.lastrowid
+            
+        return jsonify({"message": f"Team member {name} created successfully", "id": member_id}), 201
+
+    @app.route("/api/leads/<int:lead_id>/assign", methods=["POST"])
+    def assign_lead_to_member(lead_id: int):
+        payload = request.get_json(silent=True) or {}
+        member_id = payload.get("member_id")
+        member_name = payload.get("member_name")
+        member_domain = payload.get("member_domain", "")
+        notes = payload.get("notes", "")
+
+        if not member_id or not member_name:
+            return jsonify({"error": "member_id and member_name are required"}), 400
+
+        db_path = app.config["DATABASE"]
+        with db.get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE leads 
+                SET assigned_member_id = ?, 
+                    assigned_member_name = ?, 
+                    assigned_member_domain = ?, 
+                    assigned_at = CURRENT_TIMESTAMP, 
+                    assignment_notes = ?, 
+                    lead_status = 'QUALIFIED',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (member_id, member_name, member_domain, notes, lead_id))
+            if cursor.rowcount == 0:
+                return jsonify({"error": f"Lead with id {lead_id} not found"}), 404
+
+        return jsonify({
+            "message": f"Lead #{lead_id} successfully assigned to {member_name}",
+            "lead_id": lead_id,
+            "assigned_to": member_name,
+            "lead_status": "QUALIFIED"
+        }), 200
+
+    @app.route("/api/leads/assign-direct", methods=["POST"])
+    def assign_lead_direct():
+        payload = request.get_json(silent=True) or {}
+        member_id = payload.get("member_id")
+        member_name = payload.get("member_name")
+        member_domain = payload.get("member_domain", "")
+        lead_data = payload.get("lead", {})
+
+        if not member_id or not member_name or not lead_data:
+            return jsonify({"error": "member_id, member_name, and lead payload are required"}), 400
+
+        url = lead_data.get("url") or lead_data.get("source_url") or lead_data.get("website")
+        if not url:
+            return jsonify({"error": "Lead source URL is required"}), 400
+
+        db_path = app.config["DATABASE"]
+        with db.get_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM leads WHERE source_url = ? OR website = ?", (url, url))
+            row = cursor.fetchone()
+            if row:
+                lead_id = row["id"]
+                cursor.execute("""
+                    UPDATE leads 
+                    SET assigned_member_id = ?, 
+                        assigned_member_name = ?, 
+                        assigned_member_domain = ?, 
+                        assigned_at = CURRENT_TIMESTAMP, 
+                        lead_status = 'QUALIFIED',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (member_id, member_name, member_domain, lead_id))
+            else:
+                title = lead_data.get("title") or lead_data.get("company_name") or "Client Lead"
+                source = lead_data.get("source", "discover")
+                desc = lead_data.get("description") or lead_data.get("ai_summary") or ""
+                ai_sum = lead_data.get("ai_summary", "")
+                buying = lead_data.get("buying_signals", "")
+                outreach = lead_data.get("outreach_strategy", "")
+                
+                cursor.execute("""
+                    INSERT INTO leads (
+                        company_name, source_url, website, company_description, source, 
+                        lead_status, assigned_member_id, assigned_member_name, 
+                        assigned_member_domain, assigned_at, ai_summary, 
+                        buying_signals, outreach_strategy, scraped_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'QUALIFIED', ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (title, url, url, desc, source, member_id, member_name, member_domain, ai_sum, buying, outreach))
+                lead_id = cursor.lastrowid
+
+        return jsonify({
+            "message": f"Lead successfully saved & assigned to {member_name}",
+            "lead_id": lead_id,
+            "assigned_to": member_name,
+            "lead_status": "QUALIFIED"
         }), 200
 
     # ---------------------------------------------------------------------
